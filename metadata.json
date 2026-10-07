@@ -1,0 +1,6 @@
+{
+  "name": "Vehicle Pre-Trip Inspection System",
+  "description": "ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน จัดการข้อมูลยานพาหนะ ตรวจเช็ครายการสภาพรถ และบันทึกประวัติย้อนหลังเชื่อมต่อ Google Sheets",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
