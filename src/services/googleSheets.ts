@@ -38,6 +38,8 @@ const OVERALL_STATUS_LABELS: Record<string, string> = {
   not_ready: 'ไม่พร้อมใช้งาน (ห้ามขับ/ห้ามยก)',
 };
 
+const SPREADSHEET_INFO_STORAGE_KEY = 'vehicle_inspection_spreadsheet_info_v2';
+
 export const getSavedSpreadsheetId = (): string | null => {
   return localStorage.getItem(SPREADSHEET_STORAGE_KEY);
 };
@@ -46,8 +48,28 @@ export const saveSpreadsheetId = (id: string): void => {
   localStorage.setItem(SPREADSHEET_STORAGE_KEY, id);
 };
 
+export const getSavedSpreadsheetInfo = (): SpreadsheetInfo | null => {
+  try {
+    const raw = localStorage.getItem(SPREADSHEET_INFO_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+};
+
+export const saveSpreadsheetInfo = (info: SpreadsheetInfo): void => {
+  try {
+    localStorage.setItem(SPREADSHEET_INFO_STORAGE_KEY, JSON.stringify(info));
+    localStorage.setItem(SPREADSHEET_STORAGE_KEY, info.id);
+  } catch (e) {
+    // ignore
+  }
+};
+
 export const clearSpreadsheetId = (): void => {
   localStorage.removeItem(SPREADSHEET_STORAGE_KEY);
+  localStorage.removeItem(SPREADSHEET_INFO_STORAGE_KEY);
 };
 
 /**
@@ -63,11 +85,13 @@ export async function getOrCreateSpreadsheet(accessToken: string): Promise<Sprea
       });
       if (res.ok) {
         const data = await res.json();
-        return {
+        const info: SpreadsheetInfo = {
           id: existingId,
           url: `https://docs.google.com/spreadsheets/d/${existingId}/edit`,
           title: data.properties?.title || 'ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน',
         };
+        saveSpreadsheetInfo(info);
+        return info;
       }
     } catch (err) {
       console.warn('Could not load saved spreadsheet, will create new:', err);
@@ -116,11 +140,13 @@ export async function getOrCreateSpreadsheet(accessToken: string): Promise<Sprea
   // Initialize header rows
   await initializeHeaders(accessToken, spreadsheetId);
 
-  return {
+  const info: SpreadsheetInfo = {
     id: spreadsheetId,
     url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
     title: createdData.properties?.title || 'ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน',
   };
+  saveSpreadsheetInfo(info);
+  return info;
 }
 
 async function initializeHeaders(accessToken: string, spreadsheetId: string) {

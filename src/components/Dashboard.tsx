@@ -14,9 +14,11 @@ import {
   Copy, 
   Check, 
   BellRing, 
-  AlertCircle 
+  AlertCircle,
+  ExternalLink 
 } from 'lucide-react';
 import { Vehicle, InspectionRecord } from '../types/vehicle';
+import { SpreadsheetInfo } from '../services/googleSheets';
 import { VEHICLE_CATEGORY_META } from './VehicleManager';
 
 interface DashboardProps {
@@ -25,7 +27,9 @@ interface DashboardProps {
   onStartInspection: (vehicleId?: string) => void;
   onNavigateToTab: (tab: 'inspect' | 'vehicles' | 'history' | 'sheets' | 'admin') => void;
   isSheetsConnected: boolean;
+  spreadsheetInfo?: SpreadsheetInfo | null;
   onOpenSheets?: () => void;
+  onConnectSheets?: () => Promise<void>;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -34,7 +38,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onStartInspection,
   onNavigateToTab,
   isSheetsConnected,
+  spreadsheetInfo,
   onOpenSheets,
+  onConnectSheets,
 }) => {
   const [copiedDailyAlert, setCopiedDailyAlert] = useState(false);
 
@@ -572,23 +578,45 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           {/* Google Sheets Status in Dashboard */}
-          <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between text-xs">
-            <span className="text-slate-500 flex items-center gap-1.5">
-              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-              สถานะ Google Sheets:
+          <div className="pt-4 mt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span className="text-slate-500">Google Sheets:</span>
               {isSheetsConnected ? (
-                <strong className="text-emerald-700">เชื่อมต่อและพร้อมซิงค์ข้อมูล</strong>
+                <span className="inline-flex items-center gap-1 text-emerald-700 font-bold">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>ลิงก์อัตโนมัติ (บันทึกลงชีตทันที ไม่ต้องกดซิงค์)</span>
+                </span>
               ) : (
-                <strong className="text-slate-600">ยังไม่ได้เชื่อมต่อ</strong>
+                <span className="text-slate-600 font-medium">ยังไม่ได้เชื่อมต่อ</span>
               )}
-            </span>
+            </div>
 
-            <button
-              onClick={() => onNavigateToTab('sheets')}
-              className="text-blue-600 font-semibold hover:underline"
-            >
-              จัดการการเชื่อมต่อ
-            </button>
+            <div className="flex items-center gap-2">
+              {isSheetsConnected && onOpenSheets && (
+                <button
+                  onClick={onOpenSheets}
+                  className="text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1"
+                >
+                  <span>เปิดสเปรดชีต</span>
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              )}
+              {!isSheetsConnected && onConnectSheets && (
+                <button
+                  onClick={onConnectSheets}
+                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold"
+                >
+                  เชื่อมต่อ Google Sheets (คลิกครั้งเดียว)
+                </button>
+              )}
+              <button
+                onClick={() => onNavigateToTab('sheets')}
+                className="text-blue-600 font-semibold hover:underline"
+              >
+                จัดการการเชื่อมต่อ
+              </button>
+            </div>
           </div>
         </div>
       </div>

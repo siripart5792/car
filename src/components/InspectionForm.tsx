@@ -13,7 +13,8 @@ import {
   FileSpreadsheet,
   Wrench,
   Layers,
-  Zap
+  Zap,
+  ExternalLink
 } from 'lucide-react';
 import { 
   Vehicle, 
@@ -24,6 +25,7 @@ import {
   ChecklistTemplatesState,
   VehicleCategory
 } from '../types/vehicle';
+import { SpreadsheetInfo } from '../services/googleSheets';
 import { ConfirmModal } from './ConfirmModal';
 
 interface InspectionFormProps {
@@ -31,8 +33,10 @@ interface InspectionFormProps {
   checklistTemplates: ChecklistTemplatesState;
   preselectedVehicleId?: string | null;
   isSheetsConnected: boolean;
+  spreadsheetInfo?: SpreadsheetInfo | null;
   onSaveInspection: (record: Omit<InspectionRecord, 'id' | 'createdAt'>) => Promise<void>;
   onViewHistory: (vehicleId?: string) => void;
+  onConnectSheets?: () => Promise<void>;
 }
 
 export const InspectionForm: React.FC<InspectionFormProps> = ({
@@ -40,8 +44,10 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
   checklistTemplates,
   preselectedVehicleId,
   isSheetsConnected,
+  spreadsheetInfo,
   onSaveInspection,
   onViewHistory,
+  onConnectSheets,
 }) => {
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>(
     preselectedVehicleId || (vehicles[0]?.id || '')
@@ -271,7 +277,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
               {isSheetsConnected ? (
                 <>
                   <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                  <span className="text-emerald-600 text-xs font-semibold">ซิงค์แล้ว</span>
+                  <span className="text-emerald-600 text-xs font-bold">บันทึกลงชีตแล้ว</span>
                 </>
               ) : (
                 <span className="text-slate-400 text-xs">เก็บในเครื่อง</span>
@@ -280,7 +286,50 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
           </div>
         </div>
 
-        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
+        {/* Google Sheets Link Status Box on Success */}
+        {isSheetsConnected && spreadsheetInfo ? (
+          <div className="mt-5 p-4 bg-emerald-50/80 border border-emerald-200 rounded-2xl text-left flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                <FileSpreadsheet className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-emerald-900 block">
+                  บันทึกข้อมูลเข้า Google Sheets สำเร็จเรียบร้อยแล้ว (อัตโนมัติ)
+                </span>
+                <span className="text-[11px] text-emerald-700">
+                  สเปรดชีต: {spreadsheetInfo.title}
+                </span>
+              </div>
+            </div>
+
+            <a
+              href={spreadsheetInfo.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all shrink-0 self-start sm:self-auto"
+            >
+              <span>เปิดดูในชีต</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        ) : onConnectSheets ? (
+          <div className="mt-5 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-left flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="text-xs text-amber-900">
+              <span className="font-bold block">บันทึกในระบบเรียบร้อยแล้ว</span>
+              ต้องการบันทึกลง Google Sheets อัตโนมัติด้วยหรือไม่?
+            </div>
+            <button
+              onClick={onConnectSheets}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all shrink-0 self-start sm:self-auto"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>เปิดสิทธิ์ Google Sheets (คลิกครั้งเดียว)</span>
+            </button>
+          </div>
+        ) : null}
+
+        <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
           <button
             onClick={handleResetForNew}
             className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold shadow-xs transition-all"
@@ -708,17 +757,43 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
 
       {/* Submit Button */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 bg-white rounded-2xl border border-slate-200 shadow-xs">
-        <div className="text-xs text-slate-500 flex items-center gap-2">
+        <div className="text-xs text-slate-600">
           {isSheetsConnected ? (
-            <span className="text-emerald-600 font-medium flex items-center gap-1">
-              <FileSpreadsheet className="w-4 h-4" />
-              เชื่อมต่อ Google Sheets แล้ว (จะบันทึกผลลงชีตตามหมวดหมู่โดยอัตโนมัติ)
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-bold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
+                ลิงก์ Google Sheets อัตโนมัติ (บันทึกลงชีตทันที ไม่ต้องกดซิงค์)
+              </span>
+              {spreadsheetInfo && (
+                <a
+                  href={spreadsheetInfo.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-700 hover:text-emerald-900 font-semibold underline flex items-center gap-1"
+                >
+                  <span>ดูสเปรดชีต</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+            </div>
           ) : (
-            <span className="text-slate-500 flex items-center gap-1">
-              <Info className="w-4 h-4 text-blue-500" />
-              ข้อมูลจะถูกบันทึกในฐานข้อมูลระบบ และสามารถซิงค์ไป Google Sheets ได้ทุกเมื่อ
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-slate-500 flex items-center gap-1">
+                <Info className="w-4 h-4 text-blue-500" />
+                ยังไม่ได้เชื่อมต่อ Google Sheets:
+              </span>
+              {onConnectSheets && (
+                <button
+                  type="button"
+                  onClick={onConnectSheets}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition-all active:scale-98"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>เชื่อมต่อ Google Sheets (คลิก 1 ครั้งเพื่อบันทึกอัตโนมัติ)</span>
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -730,7 +805,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
           {isSubmitting ? (
             <>
               <RefreshCw className="w-4 h-4 animate-spin" />
-              กำลังบันทึกข้อมูล...
+              กำลังบันทึกและส่งเข้า Google Sheets...
             </>
           ) : (
             <>

@@ -16,7 +16,8 @@ import {
   Settings,
   Wrench,
   Menu,
-  X
+  X,
+  ExternalLink
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { 
@@ -37,14 +38,16 @@ import {
 import { 
   initAuth, 
   googleSignIn, 
-  logout 
+  logout,
+  getStoredAccessToken
 } from './services/auth';
 import { 
   getOrCreateSpreadsheet, 
   syncVehiclesToSheet, 
   syncAllInspectionsToSheet, 
   appendInspectionToSheet, 
-  SpreadsheetInfo 
+  SpreadsheetInfo,
+  getSavedSpreadsheetInfo
 } from './services/googleSheets';
 
 import { Dashboard } from './components/Dashboard';
@@ -66,10 +69,10 @@ export default function App() {
   const [preselectedVehicleId, setPreselectedVehicleId] = useState<string | null>(null);
   const [historyFilterVehicleId, setHistoryFilterVehicleId] = useState<string | null>(null);
 
-  // Auth & Google Sheets state
+  // Auth & Google Sheets state (initialized from persistent cache for instant link)
   const [user, setUser] = useState<User | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [spreadsheetInfo, setSpreadsheetInfo] = useState<SpreadsheetInfo | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(() => getStoredAccessToken());
+  const [spreadsheetInfo, setSpreadsheetInfo] = useState<SpreadsheetInfo | null>(() => getSavedSpreadsheetInfo());
   const [isConnecting, setIsConnecting] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -83,8 +86,37 @@ export default function App() {
     }, 4000);
   };
 
-  // 1. Initialize Firebase Auth State Listener
+  const isSheetsConnected = !!(accessToken || getStoredAccessToken()) && !!(spreadsheetInfo || getSavedSpreadsheetInfo());
+
+  // 1. Initialize Firebase Auth State Listener & Auto-link Google Sheets
   useEffect(() => {
+    // Check cached token and auto-fetch/verify spreadsheet immediately on launch
+    const cachedToken = getStoredAccessToken();
+    if (cachedToken) {
+      getOrCreateSpreadsheet(cachedToken)
+        .then(async (sheet) => {
+          setSpreadsheetInfo(sheet);
+          // Auto-flush any inspection records not yet synced
+          const currentRecords = loadInspections();
+          const unsynced = currentRecords.filter((r) => !r.syncedToSheets);
+          if (unsynced.length > 0) {
+            for (const rec of unsynced) {
+              try {
+                await appendInspectionToSheet(cachedToken, sheet.id, rec);
+                rec.syncedToSheets = true;
+              } catch (e) {
+                // ignore
+              }
+            }
+            saveInspections(currentRecords);
+            setInspections([...currentRecords]);
+          }
+        })
+        .catch((err) => {
+          console.warn('Could not auto-fetch spreadsheet on mount:', err);
+        });
+    }
+
     const unsubscribe = initAuth(
       async (authedUser, token) => {
         setUser(authedUser);
@@ -98,8 +130,9 @@ export default function App() {
       },
       () => {
         setUser(null);
-        setAccessToken(null);
-        setSpreadsheetInfo(null);
+        if (!getStoredAccessToken()) {
+          setAccessToken(null);
+        }
       }
     );
 
@@ -116,16 +149,16 @@ export default function App() {
       if (result) {
         setUser(result.user);
         setAccessToken(result.accessToken);
-        showToast('เข้าสู่ระบบสำเร็จ เชื่อมต่อ Google Workspace เรียบร้อยแล้ว', 'success');
+        showToast('เชื่อมต่อ Google Sheets สำเร็จเรียบร้อยแล้ว', 'success');
 
         // Create or get spreadsheet
         try {
           const sheet = await getOrCreateSpreadsheet(result.accessToken);
           setSpreadsheetInfo(sheet);
-          // Initial sync of existing data
+          // Initial sync of existing fleet and records
           await syncVehiclesToSheet(result.accessToken, sheet.id, vehicles);
           await syncAllInspectionsToSheet(result.accessToken, sheet.id, inspections);
-          showToast(`ซิงค์ข้อมูลกับ Google Sheet "${sheet.title}" เรียบร้อยแล้ว`, 'success');
+          showToast(`ซิงค์ข้อมูลกับ Google Sheet "${sheet.title}" เรียบร้อยแล้ว (ระบบจะบันทึกอัตโนมัติตลอดเวลา)`, 'success');
         } catch (sheetErr: any) {
           console.error('Sheet setup error:', sheetErr);
           showToast(`เชื่อมต่อ Sheet ผิดพลาด: ${sheetErr.message}`, 'error');
@@ -168,10 +201,12 @@ export default function App() {
         : 'รถทั่วไป';
     showToast(`เพิ่มยานพาหนะทะเบียน ${newVehicle.licensePlate} (${catLabel}) เรียบร้อยแล้ว`, 'success');
 
-    // Auto sync to sheet if connected
-    if (accessToken && spreadsheetInfo) {
+    // Auto sync to sheet immediately
+    const currentToken = accessToken || getStoredAccessToken();
+    const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
+    if (currentToken && currentSheet) {
       try {
-        await syncVehiclesToSheet(accessToken, spreadsheetInfo.id, updated);
+        await syncVehiclesToSheet(currentToken, currentSheet.id, updated);
       } catch (err) {
         console.error('Auto sync vehicle failed:', err);
       }
@@ -184,9 +219,12 @@ export default function App() {
     saveVehicles(updated);
     showToast(`แก้ไขข้อมูลทะเบียน ${updatedVehicle.licensePlate} เรียบร้อยแล้ว`, 'success');
 
-    if (accessToken && spreadsheetInfo) {
+    // Auto sync to sheet immediately
+    const currentToken = accessToken || getStoredAccessToken();
+    const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
+    if (currentToken && currentSheet) {
       try {
-        await syncVehiclesToSheet(accessToken, spreadsheetInfo.id, updated);
+        await syncVehiclesToSheet(currentToken, currentSheet.id, updated);
       } catch (err) {
         console.error('Auto sync vehicle failed:', err);
       }
@@ -200,9 +238,12 @@ export default function App() {
     saveVehicles(updated);
     showToast(`ลบยานพาหนะทะเบียน ${vehicleToDelete?.licensePlate || ''} เรียบร้อยแล้ว`, 'info');
 
-    if (accessToken && spreadsheetInfo) {
+    // Auto sync to sheet immediately
+    const currentToken = accessToken || getStoredAccessToken();
+    const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
+    if (currentToken && currentSheet) {
       try {
-        await syncVehiclesToSheet(accessToken, spreadsheetInfo.id, updated);
+        await syncVehiclesToSheet(currentToken, currentSheet.id, updated);
       } catch (err) {
         console.error('Auto sync vehicle failed:', err);
       }
@@ -222,14 +263,18 @@ export default function App() {
     showToast('คืนค่ารายการตรวจเช็คทั้ง 3 ประเภทกลับเป็นค่ามาตรฐานเริ่มต้นแล้ว', 'info');
   };
 
-  // 6. Inspection Operations
+  // 6. Inspection Operations (Direct and Automatic Google Sheets Append)
   const handleSaveInspection = async (
     recordData: Omit<InspectionRecord, 'id' | 'createdAt'>
   ): Promise<void> => {
+    const currentToken = accessToken || getStoredAccessToken();
+    const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
+
     const newRecord: InspectionRecord = {
       ...recordData,
       id: `insp-${Date.now()}`,
       createdAt: new Date().toISOString(),
+      syncedToSheets: false,
     };
 
     // Update vehicle's last odometer & status in fleet
@@ -249,28 +294,30 @@ export default function App() {
       return v;
     });
 
+    // Auto write row directly into Google Sheets if connected
+    if (currentToken && currentSheet) {
+      try {
+        await appendInspectionToSheet(currentToken, currentSheet.id, newRecord);
+        await syncVehiclesToSheet(currentToken, currentSheet.id, updatedVehicles);
+        newRecord.syncedToSheets = true;
+        showToast('บันทึกผลการตรวจและบันทึกลง Google Sheets ทันทีเรียบร้อยแล้ว', 'success');
+      } catch (err) {
+        console.error('Failed to append to Google Sheets:', err);
+        showToast('บันทึกในระบบเรียบร้อย (ส่งไป Google Sheets ล้มเหลว โปรดลองเชื่อมต่อใหม่)', 'info');
+      }
+    } else {
+      showToast(
+        `บันทึกผลการตรวจทะเบียน ${newRecord.vehicleLicensePlate} เรียบร้อยแล้ว`,
+        'success'
+      );
+    }
+
     setVehicles(updatedVehicles);
     saveVehicles(updatedVehicles);
 
     const updatedInspections = [newRecord, ...inspections];
     setInspections(updatedInspections);
     saveInspections(updatedInspections);
-
-    showToast(
-      `บันทึกผลการตรวจทะเบียน ${newRecord.vehicleLicensePlate} เรียบร้อยแล้ว`,
-      'success'
-    );
-
-    // Auto sync row to Google Sheets if connected
-    if (accessToken && spreadsheetInfo) {
-      try {
-        await appendInspectionToSheet(accessToken, spreadsheetInfo.id, newRecord);
-        await syncVehiclesToSheet(accessToken, spreadsheetInfo.id, updatedVehicles);
-        showToast('ซิงค์ข้อมูลลง Google Sheets อัตโนมัติแล้ว', 'success');
-      } catch (err) {
-        console.error('Failed to append to Google Sheets:', err);
-      }
-    }
   };
 
   const handleDeleteInspection = async (recordId: string) => {
@@ -354,7 +401,7 @@ export default function App() {
                 ระบบตรวจเช็คสภาพยานพาหนะ
               </span>
               <span className="text-[11px] text-slate-500 hidden sm:block">
-                1. ยานพาหนะทั่วไป • 2. รถบรรทุกติดเครนไฮดรอลิค
+                1. ยานพาหนะทั่วไป • 2. รถบรรทุกติดเครน • 3. รถกระเช้า Class C
               </span>
             </div>
           </div>
@@ -436,61 +483,34 @@ export default function App() {
 
           {/* Right Status / Auth */}
           <div className="flex items-center gap-2">
-            {user ? (
-              <button
-                onClick={() => setActiveTab('sheets')}
-                className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 transition-all text-xs font-medium text-emerald-900"
-                title="คลิกเพื่อจัดการ Google Sheets"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                <span className="hidden sm:inline font-bold">Sheets ซิงค์แล้ว</span>
-                {user.photoURL && (
-                  <img
-                    src={user.photoURL}
-                    alt={user.displayName || 'User'}
-                    className="w-5 h-5 rounded-full border border-emerald-300"
-                  />
-                )}
-              </button>
+            {spreadsheetInfo ? (
+              <div className="flex items-center gap-1.5">
+                <span className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>บันทึก Google Sheets อัตโนมัติ</span>
+                </span>
+                <a
+                  href={spreadsheetInfo.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition-all text-xs font-bold shadow-xs active:scale-98"
+                  title={`เปิดดู Google Sheet: ${spreadsheetInfo.title}`}
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">เปิดดู Google Sheets</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
             ) : (
               <button
                 onClick={handleGoogleLogin}
                 disabled={isConnecting}
-                className="gsi-material-button text-xs !h-9 !px-3 shadow-xs"
-                title="เชื่อมต่อ Google Sheets"
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs font-bold shadow-xs transition-all"
+                title="คลิกเชื่อมต่อ Google Sheets ครั้งเดียวเพื่อเปิดระบบบันทึกอัตโนมัติ"
               >
-                <div className="gsi-material-button-state"></div>
-                <div className="gsi-material-button-content-wrapper">
-                  <div className="gsi-material-button-icon !w-4 !h-4 !mr-2">
-                    <svg
-                      version="1.1"
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 48 48"
-                      style={{ display: 'block' }}
-                    >
-                      <path
-                        fill="#EA4335"
-                        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-                      ></path>
-                      <path
-                        fill="#4285F4"
-                        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-                      ></path>
-                      <path
-                        fill="#FBBC05"
-                        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-                      ></path>
-                      <path
-                        fill="#34A853"
-                        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-                      ></path>
-                      <path fill="none" d="M0 0h48v48H0z"></path>
-                    </svg>
-                  </div>
-                  <span className="gsi-material-button-contents text-xs font-semibold">
-                    {isConnecting ? 'กำลังต่อ...' : 'เชื่อมต่อ Sheets'}
-                  </span>
-                </div>
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>{isConnecting ? 'กำลังเชื่อมต่อ...' : 'เชื่อมต่อ Google Sheets (บันทึกอัตโนมัติ)'}</span>
               </button>
             )}
 
@@ -591,10 +611,19 @@ export default function App() {
             inspections={inspections}
             onStartInspection={handleStartInspectionForVehicle}
             onNavigateToTab={(tab) => setActiveTab(tab)}
-            isSheetsConnected={!!user && !!spreadsheetInfo}
+            isSheetsConnected={isSheetsConnected}
+            spreadsheetInfo={spreadsheetInfo}
+            onConnectSheets={handleGoogleLogin}
             onOpenSheets={() => {
-              if (spreadsheetInfo?.url) window.open(spreadsheetInfo.url, '_blank');
-              else setActiveTab('sheets');
+              if (spreadsheetInfo?.url) {
+                const a = document.createElement('a');
+                a.href = spreadsheetInfo.url;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.click();
+              } else {
+                setActiveTab('sheets');
+              }
             }}
           />
         )}
@@ -604,7 +633,9 @@ export default function App() {
             vehicles={vehicles}
             checklistTemplates={checklistTemplates}
             preselectedVehicleId={preselectedVehicleId}
-            isSheetsConnected={!!user && !!spreadsheetInfo}
+            isSheetsConnected={isSheetsConnected}
+            spreadsheetInfo={spreadsheetInfo}
+            onConnectSheets={handleGoogleLogin}
             onSaveInspection={handleSaveInspection}
             onViewHistory={handleViewHistoryForVehicle}
           />
@@ -627,9 +658,15 @@ export default function App() {
             filterVehicleId={historyFilterVehicleId}
             onDeleteRecord={handleDeleteInspection}
             onOpenSheets={() => {
-              if (spreadsheetInfo?.url) window.open(spreadsheetInfo.url, '_blank');
+              if (spreadsheetInfo?.url) {
+                const a = document.createElement('a');
+                a.href = spreadsheetInfo.url;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.click();
+              }
             }}
-            isSheetsConnected={!!user && !!spreadsheetInfo}
+            isSheetsConnected={isSheetsConnected}
           />
         )}
 
