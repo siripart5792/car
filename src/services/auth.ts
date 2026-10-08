@@ -22,8 +22,8 @@ SCOPES.forEach((scope) => {
   provider.addScope(scope);
 });
 
-// Flag to indicate if we are in the middle of a sign-in flow.
-let isSigningIn = false;
+// Flag and active promise to prevent race conditions and pending promise assertions
+let activeSignInPromise: Promise<{ user: User; accessToken: string } | null> | null = null;
 const TOKEN_STORAGE_KEY = 'fleet_google_access_token_v2';
 const TOKEN_SAVED_TIME_KEY = 'fleet_google_token_saved_time_v2';
 
@@ -91,22 +91,47 @@ export const initAuth = (
 
 // Must be called from a button click or user interaction
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
-  try {
-    isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Failed to get access token from Firebase Auth');
-    }
-
-    saveStoredAccessToken(credential.accessToken);
-    return { user: result.user, accessToken: credential.accessToken };
-  } catch (error: any) {
-    console.error('Sign in error:', error);
-    throw error;
-  } finally {
-    isSigningIn = false;
+  if (activeSignInPromise) {
+    return activeSignInPromise;
   }
+
+  activeSignInPromise = (async () => {
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (!credential?.accessToken) {
+        throw new Error('ไม่สามารถรับ Access Token จากบัญชี Google ได้');
+      }
+
+      saveStoredAccessToken(credential.accessToken);
+      return { user: result.user, accessToken: credential.accessToken };
+    } catch (error: any) {
+      if (
+        error?.code === 'auth/cancelled-popup-request' ||
+        error?.code === 'auth/popup-closed-by-user' ||
+        (typeof error?.message === 'string' && error.message.includes('cancelled-popup-request'))
+      ) {
+        console.warn('Google sign-in popup was closed or cancelled by user.');
+        return null;
+      }
+      if (error?.code === 'auth/popup-blocked') {
+        console.warn('Google sign-in popup was blocked by browser in iframe environment.');
+        throw new Error('เบราว์เซอร์บล็อกหน้าต่างป๊อปอัป กรุณากดอนุญาตป๊อปอัป (Allow Popups) ในแถบเบราว์เซอร์');
+      }
+      if (typeof error?.message === 'string' && error.message.includes('Pending promise was never set')) {
+        console.warn('Suppressed internal assertion in Firebase Auth.');
+        return null;
+      }
+      console.warn('Google sign-in exception:', error?.message || error);
+      throw error;
+    } finally {
+      setTimeout(() => {
+        activeSignInPromise = null;
+      }, 500);
+    }
+  })();
+
+  return activeSignInPromise;
 };
 
 export const getAccessToken = async (): Promise<string | null> => {

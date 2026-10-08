@@ -42,7 +42,8 @@ import {
   initAuth, 
   googleSignIn, 
   logout,
-  getStoredAccessToken
+  getStoredAccessToken,
+  saveStoredAccessToken
 } from './services/auth';
 import { 
   getOrCreateSpreadsheet, 
@@ -164,15 +165,19 @@ export default function App() {
           // Initial sync of existing fleet and records
           await syncVehiclesToSheet(result.accessToken, sheet.id, vehicles);
           await syncAllInspectionsToSheet(result.accessToken, sheet.id, inspections);
-          showToast(`ซิงค์ข้อมูลกับ Google Sheet "${sheet.title}" เรียบร้อยแล้ว (ระบบจะบันทึกอัตโนมัติตลอดเวลา)`, 'success');
+          await syncAdminUsersToSheet(result.accessToken, sheet.id, loadAdminUsers());
+          await syncBranchSummaryToSheet(result.accessToken, sheet.id, vehicles, inspections, peaBranches);
+          showToast(`ซิงค์ข้อมูลกับ Google Sheet "${sheet.title}" เรียบร้อยแล้ว`, 'success');
         } catch (sheetErr: any) {
-          console.error('Sheet setup error:', sheetErr);
-          showToast(`เชื่อมต่อ Sheet ผิดพลาด: ${sheetErr.message}`, 'error');
+          console.warn('Sheet setup error:', sheetErr);
         }
+        return result;
       }
+      return null;
     } catch (err: any) {
-      console.error('Google login failed:', err);
-      showToast(`เข้าสู่ระบบไม่สำเร็จ: ${err.message || 'โปรดลองใหม่อีกครั้ง'}`, 'error');
+      console.warn('Google login issue:', err?.message || err);
+      showToast(err?.message || 'โปรดอนุญาตป๊อปอัปในเบราว์เซอร์เพื่อเข้าสู่ระบบ Google', 'error');
+      return null;
     } finally {
       setIsConnecting(false);
     }
@@ -414,17 +419,41 @@ export default function App() {
   };
 
   const handleSyncAllSheets = async () => {
-    const currentToken = accessToken || getStoredAccessToken();
+    let currentToken = accessToken || getStoredAccessToken();
     const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
-    if (!currentToken || !currentSheet) {
-      throw new Error('ยังไม่มี Token หรือยังไม่ได้ยืนยันสิทธิ์ Google (กรุณากดเปิดสิทธิ์ที่แถบผู้ดูแลระบบ)');
+
+    if (!currentToken) {
+      showToast('กรุณากดยืนยันสิทธิ์ Google เพื่อเชื่อมโยงสเปรดชีต (กำลังเปิดหน้าต่างยืนยันสิทธิ์...)', 'info');
+      const loginRes = await handleGoogleLogin();
+      currentToken = loginRes?.accessToken || getStoredAccessToken();
+      if (!currentToken) {
+        showToast('ยังไม่มีสิทธิ์ Google (หากป๊อปอัปถูกบล็อก กรุณาอนุญาตป๊อปอัปในเบราว์เซอร์ หรือกรอก Access Token)', 'info');
+        return;
+      }
     }
-    const currentAdmins = loadAdminUsers();
-    await syncVehiclesToSheet(currentToken, currentSheet.id, vehicles);
-    await syncAllInspectionsToSheet(currentToken, currentSheet.id, inspections);
-    await syncAdminUsersToSheet(currentToken, currentSheet.id, currentAdmins);
-    await syncBranchSummaryToSheet(currentToken, currentSheet.id, vehicles, inspections, peaBranches);
-    showToast('ซิงค์ข้อมูลทั้ง 4 แผ่นงานลง Google Sheets ครบถ้วนแล้ว', 'success');
+
+    if (!currentSheet) {
+      showToast('ไม่พบข้อมูล Google Sheet กรุณาตรวจสอบลิงก์ในหน้าตั้งค่า', 'error');
+      return;
+    }
+
+    try {
+      const currentAdmins = loadAdminUsers();
+      await syncVehiclesToSheet(currentToken, currentSheet.id, vehicles);
+      await syncAllInspectionsToSheet(currentToken, currentSheet.id, inspections);
+      await syncAdminUsersToSheet(currentToken, currentSheet.id, currentAdmins);
+      await syncBranchSummaryToSheet(currentToken, currentSheet.id, vehicles, inspections, peaBranches);
+      showToast('ซิงค์ข้อมูลทั้ง 4 แผ่นงานลง Google Sheets ครบถ้วนแล้ว', 'success');
+    } catch (err: any) {
+      console.warn('Sync all sheets warning:', err);
+      showToast(`ซิงค์ข้อมูลไม่สำเร็จ: ${err?.message || 'โปรดตรวจสอบการเชื่อมต่อ'}`, 'error');
+    }
+  };
+
+  const handleUpdateAccessToken = (token: string) => {
+    saveStoredAccessToken(token);
+    setAccessToken(token);
+    showToast('บันทึก Access Token เรียบร้อยแล้ว พร้อมซิงค์ Google Sheets', 'success');
   };
 
   // Quick navigation helpers
