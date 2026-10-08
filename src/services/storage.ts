@@ -7,6 +7,49 @@ const TEMPLATES_KEY = 'fleet_inspection_templates_v3';
 const ADMIN_SESSION_KEY = 'fleet_admin_session_v3';
 const ADMIN_USERS_KEY = 'fleet_admin_users_v1';
 const CURRENT_ADMIN_USER_KEY = 'fleet_current_admin_user_v1';
+const PEA_BRANCHES_KEY = 'fleet_pea_branches_v1';
+
+export const DEFAULT_PEA_BRANCHES: string[] = [
+  'กฟภ. สำนักงานใหญ่',
+  'กฟจ.เชียงใหม่',
+  'กฟจ.นครราชสีมา',
+  'กฟจ.พิษณุโลก',
+  'กฟจ.ขอนแก่น',
+  'กฟจ.ชลบุรี',
+  'กฟจ.สงขลา',
+  'กฟจ.นครปฐม',
+  'กฟจ.พระนครศรีอยุธยา',
+  'กฟจ.สุราษฎร์ธานี',
+  'กฟจ.อุบลราชธานี',
+  'กฟจ.ระยอง',
+];
+
+export const loadPeaBranches = (): string[] => {
+  try {
+    const raw = localStorage.getItem(PEA_BRANCHES_KEY);
+    if (!raw) {
+      localStorage.setItem(PEA_BRANCHES_KEY, JSON.stringify(DEFAULT_PEA_BRANCHES));
+      return DEFAULT_PEA_BRANCHES;
+    }
+    const parsed: string[] = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      localStorage.setItem(PEA_BRANCHES_KEY, JSON.stringify(DEFAULT_PEA_BRANCHES));
+      return DEFAULT_PEA_BRANCHES;
+    }
+    return parsed;
+  } catch (e) {
+    console.error('Error loading PEA branches from storage:', e);
+    return DEFAULT_PEA_BRANCHES;
+  }
+};
+
+export const savePeaBranches = (branches: string[]): void => {
+  try {
+    localStorage.setItem(PEA_BRANCHES_KEY, JSON.stringify(branches));
+  } catch (e) {
+    console.error('Error saving PEA branches to storage:', e);
+  }
+};
 
 export const INITIAL_ADMIN_USERS: AdminUser[] = [
   {
@@ -15,6 +58,7 @@ export const INITIAL_ADMIN_USERS: AdminUser[] = [
     password: 'Pea*123456',
     displayName: 'ผู้ดูแลระบบหลัก (Super Admin)',
     role: 'super_admin',
+    peaBranch: 'กฟภ. สำนักงานใหญ่',
     email: 'computerpea2564@gmail.com',
     phone: '081-234-5678',
     status: 'active',
@@ -27,6 +71,7 @@ export const INITIAL_ADMIN_USERS: AdminUser[] = [
     password: 'Pea*123456',
     displayName: 'หัวหน้างานตรวจสภาพยานพาหนะ (Fleet Supervisor)',
     role: 'supervisor',
+    peaBranch: 'กฟจ.เชียงใหม่',
     email: 'fleet.supervisor@pea.co.th',
     phone: '089-999-8888',
     status: 'active',
@@ -95,6 +140,7 @@ export const loadVehicles = (): Vehicle[] => {
     const parsed: Vehicle[] = JSON.parse(raw);
     return parsed.map((v) => ({
       ...v,
+      peaBranch: v.peaBranch || (v.province === 'กรุงเทพมหานคร' ? 'กฟภ. สำนักงานใหญ่' : v.province ? `กฟจ.${v.province}` : 'กฟภ. สำนักงานใหญ่'),
       category: v.category || (v.vehicleType === 'bucket_truck' || v.vehicleType === 'bucket_truck_class_c' ? 'bucket_truck_class_c' : v.vehicleType === 'crane_truck' ? 'crane_truck' : 'general'),
     }));
   } catch (e) {
@@ -121,6 +167,7 @@ export const loadInspections = (): InspectionRecord[] => {
     const parsed: InspectionRecord[] = JSON.parse(raw);
     return parsed.map((r) => ({
       ...r,
+      peaBranch: r.peaBranch || 'กฟภ. สำนักงานใหญ่',
       vehicleCategory: r.vehicleCategory || (r.vehicleType === 'bucket_truck' || r.vehicleType === 'bucket_truck_class_c' ? 'bucket_truck_class_c' : r.vehicleType === 'crane_truck' ? 'crane_truck' : 'general'),
     }));
   } catch (e) {

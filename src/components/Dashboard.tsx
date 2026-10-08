@@ -15,7 +15,8 @@ import {
   Check, 
   BellRing, 
   AlertCircle,
-  ExternalLink 
+  ExternalLink,
+  Building 
 } from 'lucide-react';
 import { Vehicle, InspectionRecord } from '../types/vehicle';
 import { SpreadsheetInfo } from '../services/googleSheets';
@@ -24,36 +25,56 @@ import { VEHICLE_CATEGORY_META } from './VehicleManager';
 interface DashboardProps {
   vehicles: Vehicle[];
   inspections: InspectionRecord[];
+  peaBranches?: string[];
   onStartInspection: (vehicleId?: string) => void;
-  onNavigateToTab: (tab: 'inspect' | 'vehicles' | 'history' | 'sheets' | 'admin') => void;
+  onNavigateToTab: (tab: 'inspect' | 'vehicles' | 'history' | 'admin') => void;
   isSheetsConnected: boolean;
   spreadsheetInfo?: SpreadsheetInfo | null;
   onOpenSheets?: () => void;
-  onConnectSheets?: () => Promise<void>;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
   vehicles,
   inspections,
+  peaBranches,
   onStartInspection,
   onNavigateToTab,
   isSheetsConnected,
   spreadsheetInfo,
   onOpenSheets,
-  onConnectSheets,
 }) => {
   const [copiedDailyAlert, setCopiedDailyAlert] = useState(false);
+  const [selectedBranch, setSelectedBranch] = useState<string>('all');
 
-  const readyVehicles = vehicles.filter((v) => v.status === 'ready');
-  const attentionVehicles = vehicles.filter((v) => v.status === 'needs_attention');
-  const maintenanceVehicles = vehicles.filter((v) => v.status === 'maintenance');
+  // Available PEA branches
+  const availableBranches = Array.from(
+    new Set([
+      ...(peaBranches || []),
+      ...vehicles.map((v) => v.peaBranch || 'กฟภ. สำนักงานใหญ่')
+    ])
+  );
 
-  const generalVehiclesCount = vehicles.filter((v) => v.category === 'general').length;
-  const craneVehiclesCount = vehicles.filter((v) => v.category === 'crane_truck').length;
-  const bucketVehiclesCount = vehicles.filter((v) => v.category === 'bucket_truck_class_c').length;
+  // Filter fleet based on selected branch
+  const displayedVehicles =
+    selectedBranch === 'all'
+      ? vehicles
+      : vehicles.filter((v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === selectedBranch);
 
-  const readinessPercent = vehicles.length
-    ? Math.round((readyVehicles.length / vehicles.length) * 100)
+  const displayedInspections =
+    selectedBranch === 'all'
+      ? inspections
+      : inspections.filter((i) => (i.peaBranch || 'กฟภ. สำนักงานใหญ่') === selectedBranch);
+
+  const readyVehicles = displayedVehicles.filter((v) => v.status === 'ready');
+  const attentionVehicles = displayedVehicles.filter((v) => v.status === 'needs_attention');
+  const maintenanceVehicles = displayedVehicles.filter((v) => v.status === 'maintenance');
+
+  const generalVehiclesCount = displayedVehicles.filter((v) => v.category === 'general').length;
+  const craneVehiclesCount = displayedVehicles.filter((v) => v.category === 'crane_truck').length;
+  const bucketVehiclesCount = displayedVehicles.filter((v) => v.category === 'bucket_truck_class_c').length;
+
+  const readinessPercent = displayedVehicles.length
+    ? Math.round((readyVehicles.length / displayedVehicles.length) * 100)
     : 100;
 
   // Inspections today (using local date string YYYY-MM-DD)
@@ -61,18 +82,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const todayStr = todayDateObj.toISOString().split('T')[0];
   
   // Set of vehicle IDs inspected today
-  const inspectedTodayRecords = inspections.filter((i) => i.inspectionDate.startsWith(todayStr));
+  const inspectedTodayRecords = displayedInspections.filter((i) => i.inspectionDate.startsWith(todayStr));
   const inspectedVehicleIdsToday = new Set(inspectedTodayRecords.map((i) => i.vehicleId));
 
   // Vehicles that have NOT been inspected today (excluding those in maintenance)
-  const pendingVehiclesToday = vehicles.filter(
+  const pendingVehiclesToday = displayedVehicles.filter(
     (v) => !inspectedVehicleIdsToday.has(v.id) && v.status !== 'maintenance'
   );
 
   // Vehicles that HAVE been inspected today
-  const completedVehiclesToday = vehicles.filter((v) => inspectedVehicleIdsToday.has(v.id));
+  const completedVehiclesToday = displayedVehicles.filter((v) => inspectedVehicleIdsToday.has(v.id));
 
-  const recentInspections = [...inspections]
+  const recentInspections = [...displayedInspections]
     .sort((a, b) => new Date(b.inspectionDate).getTime() - new Date(a.inspectionDate).getTime())
     .slice(0, 5);
 
@@ -86,10 +107,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Handler to copy the daily uninspected list for LINE or dispatcher sharing
   const handleCopyPendingList = () => {
     if (pendingVehiclesToday.length === 0) return;
+    const branchTitle = selectedBranch === 'all' ? 'ทุกการไฟฟ้า' : selectedBranch;
     const textLines = [
-      `📢 สรุปรายชื่อยานพาหนะที่ "ยังไม่ได้ตรวจสภาพก่อนปฏิบัติงาน" ประจำวัน:`,
+      `📢 สรุปรายชื่อยานพาหนะที่ "ยังไม่ได้ตรวจสภาพก่อนปฏิบัติงาน" ประจำวัน (${branchTitle}):`,
       `📅 วันที่: ${formattedTodayDate}`,
-      `⚠️ ค้างตรวจทั้งหมด: ${pendingVehiclesToday.length} คัน (จาก ${vehicles.length} คัน)`,
+      `⚠️ ค้างตรวจทั้งหมด: ${pendingVehiclesToday.length} คัน (จาก ${displayedVehicles.length} คัน)`,
       `----------------------------------------`,
       ...pendingVehiclesToday.map((v, i) => {
         const catName =
@@ -98,7 +120,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             : v.category === 'crane_truck'
             ? 'รถบรรทุกติดเครน'
             : 'ทั่วไป';
-        return `${i + 1}. ทะเบียน ${v.licensePlate} (${v.brand} ${v.model}) [${catName}] - ${v.department}`;
+        return `${i + 1}. [${v.peaBranch || 'กฟภ.'}] ทะเบียน ${v.licensePlate} (${v.brand} ${v.model}) [${catName}] - ${v.department}`;
       }),
       `----------------------------------------`,
       `*กรุณาตรวจสภาพรถตามแบบฟอร์มก่อนนำรถออกปฏิบัติงาน เพื่อความปลอดภัยสูงสุด*`,
@@ -111,6 +133,44 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* PEA Branch Filter Bar */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+            <Building className="w-4 h-4 text-indigo-600" />
+            <span>เลือกการไฟฟ้าที่สังกัด:</span>
+          </div>
+          <select
+            value={selectedBranch}
+            onChange={(e) => setSelectedBranch(e.target.value)}
+            className="px-3 py-1.5 bg-indigo-50/80 border border-indigo-200 text-indigo-950 font-bold rounded-xl text-xs focus:ring-2 focus:ring-indigo-500/20"
+          >
+            <option value="all">⚡ ทุกการไฟฟ้าทั้งหมด ({vehicles.length} คัน)</option>
+            {availableBranches.map((b) => {
+              const count = vehicles.filter((v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === b).length;
+              return (
+                <option key={b} value={b}>
+                  {b} ({count} คัน)
+                </option>
+              );
+            })}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500">
+            แสดงยานพาหนะ: <strong className="text-slate-900 font-bold">{displayedVehicles.length}</strong> คัน
+          </span>
+          {selectedBranch !== 'all' && (
+            <button
+              onClick={() => setSelectedBranch('all')}
+              className="text-xs text-blue-600 font-semibold hover:underline"
+            >
+              ดูทุกการไฟฟ้า
+            </button>
+          )}
+        </div>
+      </div>
       {/* Daily Audit Notification Banner */}
       {pendingVehiclesToday.length > 0 ? (
         <div className="bg-amber-500/10 border-2 border-amber-400/80 rounded-3xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in slide-in-from-top-2 duration-200">
@@ -578,44 +638,28 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           {/* Google Sheets Status in Dashboard */}
-          <div className="pt-4 mt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="pt-4 mt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
               <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span className="text-slate-500">Google Sheets:</span>
-              {isSheetsConnected ? (
-                <span className="inline-flex items-center gap-1 text-emerald-700 font-bold">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>ลิงก์อัตโนมัติ (บันทึกลงชีตทันที ไม่ต้องกดซิงค์)</span>
-                </span>
-              ) : (
-                <span className="text-slate-600 font-medium">ยังไม่ได้เชื่อมต่อ</span>
-              )}
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-[11px]">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>บันทึกข้อมูลเข้า Google Sheets อัตโนมัติ (ไม่ต้องกดซิงค์)</span>
+              </span>
             </div>
 
             <div className="flex items-center gap-2">
-              {isSheetsConnected && onOpenSheets && (
-                <button
-                  onClick={onOpenSheets}
-                  className="text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1"
+              {spreadsheetInfo?.url && (
+                <a
+                  href={spreadsheetInfo.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all active:scale-98"
                 >
-                  <span>เปิดสเปรดชีต</span>
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>เปิดดูสเปรดชีต Google Sheets</span>
                   <ExternalLink className="w-3 h-3" />
-                </button>
+                </a>
               )}
-              {!isSheetsConnected && onConnectSheets && (
-                <button
-                  onClick={onConnectSheets}
-                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold"
-                >
-                  เชื่อมต่อ Google Sheets (คลิกครั้งเดียว)
-                </button>
-              )}
-              <button
-                onClick={() => onNavigateToTab('sheets')}
-                className="text-blue-600 font-semibold hover:underline"
-              >
-                จัดการการเชื่อมต่อ
-              </button>
             </div>
           </div>
         </div>

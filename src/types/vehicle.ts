@@ -19,6 +19,7 @@ export interface Vehicle {
   id: string;
   licensePlate: string;
   province: string;
+  peaBranch: string; // การไฟฟ้าที่สังกัด เช่น 'กฟจ.เชียงใหม่', 'กฟจ.นครราชสีมา', 'กฟภ. สำนักงานใหญ่'
   category: VehicleCategory; // 'general' = ยานพาหนะทั่วไป, 'crane_truck' = รถบรรทุกติดเครนไฮดรอลิค, 'bucket_truck_class_c' = รถกระเช้า Class C
   vehicleType: VehicleType;
   brand: string;
@@ -49,6 +50,7 @@ export interface InspectionRecord {
   id: string;
   vehicleId: string;
   vehicleLicensePlate: string;
+  peaBranch: string; // การไฟฟ้าที่สังกัด
   vehicleCategory: VehicleCategory;
   vehicleType: VehicleType;
   brand: string;
@@ -89,6 +91,7 @@ export interface AdminUser {
   password: string;
   displayName: string;
   role: AdminRole;
+  peaBranch?: string; // การไฟฟ้าที่สังกัด
   email?: string;
   phone?: string;
   status: 'active' | 'inactive';

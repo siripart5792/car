@@ -21,10 +21,12 @@ import { ConfirmModal } from './ConfirmModal';
 
 interface VehicleManagerProps {
   vehicles: Vehicle[];
+  peaBranches?: string[];
   onAddVehicle: (vehicle: Omit<Vehicle, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onUpdateVehicle: (vehicle: Vehicle) => void;
   onDeleteVehicle: (vehicleId: string) => void;
   onStartInspection: (vehicleId: string) => void;
+  onNavigateToPeaBranches?: () => void;
 }
 
 export const VEHICLE_CATEGORY_META: Record<VehicleCategory, { label: string; badgeLabel: string; bg: string; text: string; icon: React.ReactNode }> = {
@@ -92,14 +94,32 @@ const FUEL_LABELS: Record<FuelType, string> = {
   cng_lpg: 'ก๊าซ NGV / LPG',
 };
 
+export const COMMON_PEA_BRANCHES = [
+  'กฟภ. สำนักงานใหญ่',
+  'กฟจ.เชียงใหม่',
+  'กฟจ.นครราชสีมา',
+  'กฟจ.พิษณุโลก',
+  'กฟจ.ขอนแก่น',
+  'กฟจ.ชลบุรี',
+  'กฟจ.สงขลา',
+  'กฟจ.นครปฐม',
+  'กฟจ.พระนครศรีอยุธยา',
+  'กฟจ.สุราษฎร์ธานี',
+  'กฟจ.อุบลราชธานี',
+  'กฟจ.ระยอง',
+];
+
 export const VehicleManager: React.FC<VehicleManagerProps> = ({
   vehicles,
+  peaBranches,
   onAddVehicle,
   onUpdateVehicle,
   onDeleteVehicle,
   onStartInspection,
+  onNavigateToPeaBranches,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedBranch, setSelectedBranch] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
@@ -114,6 +134,7 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
   const [formData, setFormData] = useState({
     licensePlate: '',
     province: 'กรุงเทพมหานคร',
+    peaBranch: (peaBranches && peaBranches[0]) || 'กฟภ. สำนักงานใหญ่',
     category: 'general' as VehicleCategory,
     vehicleType: 'pickup' as VehicleType,
     brand: '',
@@ -131,6 +152,7 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
     setFormData({
       licensePlate: '',
       province: 'กรุงเทพมหานคร',
+      peaBranch: (peaBranches && peaBranches[0]) || 'กฟภ. สำนักงานใหญ่',
       category: 'general',
       vehicleType: 'pickup',
       brand: '',
@@ -150,6 +172,7 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
     setFormData({
       licensePlate: v.licensePlate,
       province: v.province,
+      peaBranch: v.peaBranch || (peaBranches && peaBranches[0]) || 'กฟภ. สำนักงานใหญ่',
       category: v.category || 'general',
       vehicleType: v.vehicleType,
       brand: v.brand,
@@ -187,19 +210,26 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
     setIsFormOpen(false);
   };
 
+  const activeBranchList = peaBranches && peaBranches.length > 0 ? peaBranches : COMMON_PEA_BRANCHES;
+  const availableBranches = Array.from(
+    new Set([...activeBranchList, ...vehicles.map((v) => v.peaBranch || 'กฟภ. สำนักงานใหญ่')])
+  );
+
   const filteredVehicles = vehicles.filter((v) => {
     const matchesSearch =
       v.licensePlate.toLowerCase().includes(searchTerm.toLowerCase()) ||
       v.province.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (v.peaBranch && v.peaBranch.toLowerCase().includes(searchTerm.toLowerCase())) ||
       v.brand.toLowerCase().includes(searchTerm.toLowerCase()) ||
       v.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
       v.department.toLowerCase().includes(searchTerm.toLowerCase());
 
+    const matchesBranch = selectedBranch === 'all' || (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === selectedBranch;
     const matchesCategory = selectedCategory === 'all' || v.category === selectedCategory;
     const matchesType = selectedType === 'all' || v.vehicleType === selectedType;
     const matchesStatus = selectedStatus === 'all' || v.status === selectedStatus;
 
-    return matchesSearch && matchesCategory && matchesType && matchesStatus;
+    return matchesSearch && matchesBranch && matchesCategory && matchesType && matchesStatus;
   });
 
   const deletingVehicle = vehicles.find((v) => v.id === deletingVehicleId);
@@ -214,7 +244,7 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
             ข้อมูลยานพาหนะในระบบ
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            แบ่งประเภทเป็น 3 กลุ่ม: 1. ยานพาหนะทั่วไป • 2. รถบรรทุกติดเครนไฮดรอลิค • 3. รถกระเช้า Class C ({vehicles.length} คัน)
+            แยกข้อมูลตามการไฟฟ้าส่วนภูมิภาค ({availableBranches.length} สังกัด) • แบ่ง 3 กลุ่มประเภทรถ ({vehicles.length} คัน)
           </p>
         </div>
         <button
@@ -226,18 +256,67 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
         </button>
       </div>
 
+      {/* Quick PEA Branch Selection Tabs */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+        <button
+          onClick={() => setSelectedBranch('all')}
+          className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all ${
+            selectedBranch === 'all'
+              ? 'bg-slate-900 text-white shadow-xs'
+              : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+          }`}
+        >
+          ทุกการไฟฟ้า ({vehicles.length})
+        </button>
+        {availableBranches.map((b) => {
+          const count = vehicles.filter((v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === b).length;
+          if (count === 0 && selectedBranch !== b) return null;
+          return (
+            <button
+              key={b}
+              onClick={() => setSelectedBranch(b)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold shrink-0 transition-all ${
+                selectedBranch === b
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              {b} ({count})
+            </button>
+          );
+        })}
+      </div>
+
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
-              placeholder="ค้นหาตามทะเบียนรถ, ยี่ห้อ, รุ่น, สังกัด..."
+              placeholder="ค้นหาทะเบียน, รุ่น, สังกัด..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-800"
             />
+          </div>
+
+          <div>
+            <select
+              value={selectedBranch}
+              onChange={(e) => setSelectedBranch(e.target.value)}
+              className="w-full px-3 py-2 bg-indigo-50/70 border border-indigo-200 text-indigo-900 font-bold rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+            >
+              <option value="all">⚡ ทุกการไฟฟ้า ({vehicles.length} คัน)</option>
+              {availableBranches.map((branch) => {
+                const count = vehicles.filter((v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === branch).length;
+                return (
+                  <option key={branch} value={branch}>
+                    {branch} ({count} คัน)
+                  </option>
+                );
+              })}
+            </select>
           </div>
 
           <div>
@@ -282,12 +361,13 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
           </div>
         </div>
 
-        {(searchTerm || selectedCategory !== 'all' || selectedType !== 'all' || selectedStatus !== 'all') && (
+        {(searchTerm || selectedBranch !== 'all' || selectedCategory !== 'all' || selectedType !== 'all' || selectedStatus !== 'all') && (
           <div className="flex items-center justify-between text-xs text-slate-500 pt-2 border-t border-slate-100">
             <span>ผลการค้นหา {filteredVehicles.length} คัน จากทั้งหมด {vehicles.length} คัน</span>
             <button
               onClick={() => {
                 setSearchTerm('');
+                setSelectedBranch('all');
                 setSelectedCategory('all');
                 setSelectedType('all');
                 setSelectedStatus('all');
@@ -321,7 +401,7 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
               >
                 <div className="p-5">
                   {/* Category Pill and Status */}
-                  <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                     <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${categoryInfo.bg}`}>
                       {categoryInfo.icon}
                       {categoryInfo.label}
@@ -332,6 +412,14 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
                     >
                       {statusInfo.icon}
                       {statusInfo.label}
+                    </span>
+                  </div>
+
+                  {/* PEA Branch Badge */}
+                  <div className="mb-2">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] font-bold">
+                      <Building className="w-3 h-3 text-indigo-600" />
+                      {v.peaBranch || 'กฟภ. สำนักงานใหญ่'}
                     </span>
                   </div>
 
@@ -520,6 +608,50 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
                     <span className="text-xs">3. กระเช้า Class C</span>
                     <span className="text-[10px] text-slate-500 font-normal mt-0.5">ฉนวนไฟฟ้า, ฮอทไลน์</span>
                   </label>
+                </div>
+              </div>
+
+              {/* PEA Branch Field */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    การไฟฟ้าที่สังกัด (PEA Branch) <span className="text-red-500">*</span>
+                  </label>
+                  <span className="text-[10px] text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md font-semibold border border-purple-200 inline-flex items-center gap-1">
+                    🔒 สิทธิ์เฉพาะผู้ดูแลระบบในการเพิ่ม/ลบ
+                  </span>
+                </div>
+                <select
+                  value={formData.peaBranch}
+                  onChange={(e) => setFormData({ ...formData, peaBranch: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-slate-50 text-slate-800"
+                >
+                  {/* If vehicle has legacy branch name not in active list, retain it as option */}
+                  {formData.peaBranch && !activeBranchList.includes(formData.peaBranch) && (
+                    <option value={formData.peaBranch}>
+                      {formData.peaBranch} (สังกัดเดิม)
+                    </option>
+                  )}
+                  {activeBranchList.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1.5">
+                  <span>เลือกจากการไฟฟ้าที่ลงทะเบียนในระบบเพื่อมาตรฐานเดียวกัน</span>
+                  {onNavigateToPeaBranches && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsFormOpen(false);
+                        onNavigateToPeaBranches();
+                      }}
+                      className="text-purple-600 hover:text-purple-800 font-semibold hover:underline"
+                    >
+                      จัดการรายชื่อการไฟฟ้า &rarr;
+                    </button>
+                  )}
                 </div>
               </div>
 

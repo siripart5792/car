@@ -177,6 +177,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
       await onSaveInspection({
         vehicleId: selectedVehicle.id,
         vehicleLicensePlate: selectedVehicle.licensePlate,
+        peaBranch: selectedVehicle.peaBranch || 'กฟภ. สำนักงานใหญ่',
         vehicleCategory: selectedVehicle.category,
         vehicleType: selectedVehicle.vehicleType,
         brand: selectedVehicle.brand,
@@ -388,14 +389,19 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
             >
               {vehicles.map((v) => (
                 <option key={v.id} value={v.id}>
-                  {v.licensePlate} ({v.brand} {v.model}) - {v.category === 'bucket_truck_class_c' ? '[กระเช้า Class C]' : v.category === 'crane_truck' ? '[รถเครน]' : '[ทั่วไป]'}
+                  [{v.peaBranch || 'กฟภ. สำนักงานใหญ่'}] {v.licensePlate} ({v.brand} {v.model}) - {v.category === 'bucket_truck_class_c' ? 'กระเช้า Class C' : v.category === 'crane_truck' ? 'รถเครน' : 'ทั่วไป'}
                 </option>
               ))}
             </select>
             {selectedVehicle && (
-              <span className="text-[11px] text-slate-500 mt-1 block">
-                สังกัด: {selectedVehicle.department}
-              </span>
+              <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                  ⚡ {selectedVehicle.peaBranch || 'กฟภ. สำนักงานใหญ่'}
+                </span>
+                <span className="text-[11px] text-slate-500 truncate max-w-[200px]">
+                  {selectedVehicle.department}
+                </span>
+              </div>
             )}
           </div>
 

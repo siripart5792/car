@@ -23,7 +23,14 @@ import {
   Phone, 
   Mail,
   Eye,
-  EyeOff
+  EyeOff,
+  FileSpreadsheet,
+  ExternalLink,
+  RefreshCw,
+  Building,
+  Building2,
+  Trash,
+  Search
 } from 'lucide-react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { 
@@ -34,8 +41,9 @@ import {
   AdminUser,
   AdminRole
 } from '../types/vehicle';
-import { VehicleManager } from './VehicleManager';
+import { VehicleManager, COMMON_PEA_BRANCHES } from './VehicleManager';
 import { ConfirmModal } from './ConfirmModal';
+import { SpreadsheetInfo, saveSpreadsheetInfo } from '../services/googleSheets';
 import { 
   loadAdminUsers, 
   saveAdminUsers, 
@@ -48,7 +56,9 @@ import {
 interface AdminPanelProps {
   user: FirebaseUser | null;
   vehicles: Vehicle[];
+  peaBranches?: string[];
   checklistTemplates: ChecklistTemplatesState;
+  spreadsheetInfo?: SpreadsheetInfo | null;
   onGoogleLogin: () => Promise<void>;
   onAddVehicle: (vehicle: Omit<Vehicle, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onUpdateVehicle: (vehicle: Vehicle) => void;
@@ -56,9 +66,14 @@ interface AdminPanelProps {
   onStartInspection: (vehicleId: string) => void;
   onUpdateTemplates: (newTemplates: ChecklistTemplatesState) => void;
   onResetTemplates: () => void;
+  onSyncAdminUsers?: (users: AdminUser[]) => Promise<void>;
+  onSyncAllSheets?: () => Promise<void>;
+  onUpdateSpreadsheetInfo?: (info: SpreadsheetInfo) => void;
+  onAddPeaBranch?: (branchName: string) => Promise<{ success: boolean; message: string }>;
+  onDeletePeaBranch?: (branchName: string) => Promise<{ success: boolean; message: string }>;
 }
 
-type AdminSubTab = 'vehicles' | 'general_checklist' | 'crane_checklist' | 'bucket_checklist' | 'admin_users';
+type AdminSubTab = 'vehicles' | 'general_checklist' | 'crane_checklist' | 'bucket_checklist' | 'admin_users' | 'pea_branches' | 'sheets_config';
 
 const ROLE_META: Record<AdminRole, { label: string; bg: string; text: string }> = {
   super_admin: { label: 'ผู้ดูแลระบบหลัก (Super Admin)', bg: 'bg-rose-50 border-rose-200 text-rose-700', text: 'text-rose-700' },
@@ -69,7 +84,9 @@ const ROLE_META: Record<AdminRole, { label: string; bg: string; text: string }> 
 export const AdminPanel: React.FC<AdminPanelProps> = ({
   user,
   vehicles,
+  peaBranches = [],
   checklistTemplates,
+  spreadsheetInfo,
   onGoogleLogin,
   onAddVehicle,
   onUpdateVehicle,
@@ -77,10 +94,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onStartInspection,
   onUpdateTemplates,
   onResetTemplates,
+  onSyncAdminUsers,
+  onSyncAllSheets,
+  onUpdateSpreadsheetInfo,
+  onAddPeaBranch,
+  onDeletePeaBranch,
 }) => {
   // Admin users list state
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => loadAdminUsers());
   const [currentAdmin, setCurrentAdmin] = useState<AdminUser | null>(() => getCurrentAdminUser());
+
+  // PEA Branches management states (Admin Only)
+  const [newBranchInput, setNewBranchInput] = useState('');
+  const [branchStatusMessage, setBranchStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [branchSearchTerm, setBranchSearchTerm] = useState('');
+  const [deletingBranchName, setDeletingBranchName] = useState<string | null>(null);
+  const [isSubmittingBranch, setIsSubmittingBranch] = useState(false);
+
+  // Sheets Config states
+  const [sheetUrlInput, setSheetUrlInput] = useState<string>(spreadsheetInfo?.url || '');
+  const [sheetSaveStatus, setSheetSaveStatus] = useState<string>('');
+  const [isSyncingAllSheets, setIsSyncingAllSheets] = useState(false);
+
+  useEffect(() => {
+    if (spreadsheetInfo?.url) {
+      setSheetUrlInput(spreadsheetInfo.url);
+    }
+  }, [spreadsheetInfo]);
 
   // Admin Login Authentication state
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(() => {
@@ -156,6 +196,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     password: '',
     displayName: '',
     role: 'admin' as AdminRole,
+    peaBranch: 'กฟภ. สำนักงานใหญ่',
     email: '',
     phone: '',
     status: 'active' as 'active' | 'inactive',
@@ -171,6 +212,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       password: '',
       displayName: '',
       role: 'admin',
+      peaBranch: 'กฟภ. สำนักงานใหญ่',
       email: '',
       phone: '',
       status: 'active',
@@ -187,6 +229,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       password: admin.password,
       displayName: admin.displayName,
       role: admin.role,
+      peaBranch: admin.peaBranch || 'กฟภ. สำนักงานใหญ่',
       email: admin.email || '',
       phone: admin.phone || '',
       status: admin.status,
@@ -227,6 +270,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             password: adminUserFormData.password,
             displayName: adminUserFormData.displayName.trim(),
             role: adminUserFormData.role,
+            peaBranch: adminUserFormData.peaBranch,
             email: adminUserFormData.email.trim(),
             phone: adminUserFormData.phone.trim(),
             status: adminUserFormData.status,
@@ -238,6 +282,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       setAdminUsers(updated);
       saveAdminUsers(updated);
+      if (onSyncAdminUsers) {
+        onSyncAdminUsers(updated).catch(console.error);
+      }
       if (currentAdmin?.id === editingAdminUser.id) {
         const myUpdate = updated.find((u) => u.id === currentAdmin.id) || null;
         setCurrentAdmin(myUpdate);
@@ -257,6 +304,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         password: adminUserFormData.password,
         displayName: adminUserFormData.displayName.trim(),
         role: adminUserFormData.role,
+        peaBranch: adminUserFormData.peaBranch,
         email: adminUserFormData.email.trim(),
         phone: adminUserFormData.phone.trim(),
         status: adminUserFormData.status,
@@ -267,6 +315,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       const updated = [...adminUsers, newAdmin];
       setAdminUsers(updated);
       saveAdminUsers(updated);
+      if (onSyncAdminUsers) {
+        onSyncAdminUsers(updated).catch(console.error);
+      }
     }
 
     setAdminUserModalOpen(false);
@@ -284,10 +335,84 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     const updated = adminUsers.filter((u) => u.id !== deletingAdminUserId);
     setAdminUsers(updated);
     saveAdminUsers(updated);
+    if (onSyncAdminUsers) {
+      onSyncAdminUsers(updated).catch(console.error);
+    }
     setDeletingAdminUserId(null);
   };
 
   const deletingTargetUser = adminUsers.find((u) => u.id === deletingAdminUserId);
+
+  // --- PEA Branches Master Data Logic (Admin Only) ---
+  const activePeaBranches = peaBranches && peaBranches.length > 0 ? peaBranches : COMMON_PEA_BRANCHES;
+
+  const PRESET_BRANCH_SUGGESTIONS = [
+    'กฟจ.ลำปาง',
+    'กฟจ.เชียงราย',
+    'กฟจ.นครสวรรค์',
+    'กฟจ.สุโขทัย',
+    'กฟจ.อุดรธานี',
+    'กฟจ.สกลนคร',
+    'กฟจ.สุรินทร์',
+    'กฟจ.บุรีรัมย์',
+    'กฟจ.ฉะเชิงเทรา',
+    'กฟจ.ปราจีนบุรี',
+    'กฟจ.ภูเก็ต',
+    'กฟจ.กระบี่',
+    'กฟส.หางดง',
+    'กฟส.แม่ริม',
+    'กฟส.ปากช่อง',
+    'กฟส.หัวหิน',
+  ];
+
+  const handleAddNewBranch = async (e?: React.FormEvent, directName?: string) => {
+    if (e) e.preventDefault();
+    const candidate = (directName || newBranchInput).trim();
+    if (!candidate) {
+      setBranchStatusMessage({ type: 'error', text: 'กรุณาระบุชื่อการไฟฟ้าที่ต้องการเพิ่ม' });
+      return;
+    }
+    if (activePeaBranches.some((b) => b.trim().toLowerCase() === candidate.toLowerCase())) {
+      setBranchStatusMessage({ type: 'error', text: `มีรายชื่อ "${candidate}" อยู่ในระบบแล้ว` });
+      return;
+    }
+
+    if (onAddPeaBranch) {
+      setIsSubmittingBranch(true);
+      try {
+        const res = await onAddPeaBranch(candidate);
+        if (res.success) {
+          setNewBranchInput('');
+          setBranchStatusMessage({ type: 'success', text: res.message });
+          setTimeout(() => setBranchStatusMessage(null), 4000);
+        } else {
+          setBranchStatusMessage({ type: 'error', text: res.message });
+        }
+      } catch (err: any) {
+        setBranchStatusMessage({ type: 'error', text: err?.message || 'เกิดข้อผิดพลาดในการเพิ่มรายชื่อ' });
+      } finally {
+        setIsSubmittingBranch(false);
+      }
+    }
+  };
+
+  const handleConfirmDeleteBranch = async () => {
+    if (!deletingBranchName) return;
+    if (onDeletePeaBranch) {
+      try {
+        const res = await onDeletePeaBranch(deletingBranchName);
+        if (res.success) {
+          setBranchStatusMessage({ type: 'success', text: res.message });
+          setTimeout(() => setBranchStatusMessage(null), 4000);
+        } else {
+          setBranchStatusMessage({ type: 'error', text: res.message });
+        }
+      } catch (err: any) {
+        setBranchStatusMessage({ type: 'error', text: err?.message || 'เกิดข้อผิดพลาดในการลบ' });
+      }
+    }
+    setDeletingBranchName(null);
+  };
 
   // --- Checklist Items & Templates States ---
   const [itemModalOpen, setItemModalOpen] = useState(false);
@@ -672,6 +797,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             <Users className="w-4 h-4 text-amber-400" />
             จัดการผู้ดูแลระบบ ({adminUsers.length})
           </button>
+
+          {/* SubTab: Manage PEA Branches (NEW - Admin Only!) */}
+          <button
+            onClick={() => setSubTab('pea_branches')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              subTab === 'pea_branches'
+                ? 'bg-purple-900 text-purple-200 shadow-xs'
+                : 'text-purple-700 hover:text-purple-950 font-bold'
+            }`}
+          >
+            <Building2 className="w-4 h-4 text-purple-400" />
+            จัดการรายชื่อการไฟฟ้า ({activePeaBranches.length})
+          </button>
+
+          {/* SubTab 6: Google Sheets Config */}
+          <button
+            onClick={() => setSubTab('sheets_config')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+              subTab === 'sheets_config'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'text-emerald-800 hover:text-emerald-950 font-bold'
+            }`}
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+            ตั้งค่า Google Sheets (4 แผ่นงาน)
+          </button>
         </div>
       </div>
 
@@ -679,10 +830,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       {subTab === 'vehicles' && (
         <VehicleManager
           vehicles={vehicles}
+          peaBranches={activePeaBranches}
           onAddVehicle={onAddVehicle}
           onUpdateVehicle={onUpdateVehicle}
           onDeleteVehicle={onDeleteVehicle}
           onStartInspection={onStartInspection}
+          onNavigateToPeaBranches={() => setSubTab('pea_branches')}
         />
       )}
 
@@ -727,7 +880,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 >
                   <div>
                     {/* Role & Status */}
-                    <div className="flex items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                       <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${roleInfo.bg}`}>
                         {roleInfo.label}
                       </span>
@@ -735,6 +888,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                         admin.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
                       }`}>
                         {admin.status === 'active' ? '● ใช้งานปกติ' : '○ ระงับใช้งาน'}
+                      </span>
+                    </div>
+
+                    {/* PEA Branch badge */}
+                    <div className="mb-2.5">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] font-bold">
+                        <Building className="w-3 h-3 text-indigo-600" />
+                        {admin.peaBranch || 'กฟภ. สำนักงานใหญ่'}
                       </span>
                     </div>
 
@@ -950,7 +1111,481 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         </div>
       )}
 
-      {/* Modal: Add/Edit Admin User (NEW!) */}
+      {/* SubTab: Manage PEA Branches (NEW - Admin Only!) */}
+      {subTab === 'pea_branches' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Header Card */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0 shadow-xs">
+                <Building2 className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-slate-900 text-base sm:text-lg">
+                    ระบบจัดการรายชื่อการไฟฟ้า (PEA Branches Master Data)
+                  </h3>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                    <ShieldCheck className="w-3.5 h-3.5 text-purple-600" />
+                    เฉพาะผู้ดูแลระบบเท่านั้นที่เพิ่ม-ลบได้
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                  กำหนดและควบคุมรายชื่อการไฟฟ้าทั้งหมดในระบบ เพื่อจัดกลุ่มยานพาหนะ คัดกรองข้อมูล และเชื่อมโยงแผ่นงานสรุปใน Google Sheets
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {onSyncAllSheets && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSyncingAllSheets(true);
+                    onSyncAllSheets()
+                      .catch(console.error)
+                      .finally(() => setIsSyncingAllSheets(false));
+                  }}
+                  disabled={isSyncingAllSheets}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 active:scale-98 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-all disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isSyncingAllSheets ? 'animate-spin' : ''}`} />
+                  <span>ซิงค์สถิติไปยัง Google Sheets</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Metrics Grid */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-slate-500">การไฟฟ้าทั้งหมด</span>
+                <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                  <Building2 className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-2xl font-extrabold text-slate-900">{activePeaBranches.length}</p>
+              <p className="text-[11px] text-slate-400 mt-1">แห่งที่ลงทะเบียนในระบบ</p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-slate-500">มีรถประจำการ</span>
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <Car className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-2xl font-extrabold text-emerald-600">
+                {activePeaBranches.filter((b) => vehicles.some((v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === b)).length}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1">แห่งที่มีรถพร้อมใช้งาน</p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-slate-500">ยังไม่มีรถประจำการ</span>
+                <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <Building className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-2xl font-extrabold text-amber-600">
+                {activePeaBranches.filter((b) => !vehicles.some((v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === b)).length}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1">พร้อมสำหรับลงทะเบียนรถใหม่</p>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-slate-500">ยานพาหนะรวมทุกแห่ง</span>
+                <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Car className="w-4 h-4" />
+                </div>
+              </div>
+              <p className="text-2xl font-extrabold text-blue-600">{vehicles.length}</p>
+              <p className="text-[11px] text-slate-400 mt-1">คัน ในฐานข้อมูล</p>
+            </div>
+          </div>
+
+          {/* Add PEA Branch Form Card */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm sm:text-base flex items-center gap-2">
+                  <Plus className="w-4 h-4 text-purple-600" />
+                  เพิ่มรายชื่อการไฟฟ้าใหม่ (Add PEA Branch)
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  ระบุชื่อการไฟฟ้าที่ต้องการเปิดใช้งานในระบบ เมื่อเพิ่มแล้วจะแสดงในตัวเลือกของรถและรายงานทันที
+                </p>
+              </div>
+            </div>
+
+            {branchStatusMessage && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs flex items-center gap-2.5 animate-in fade-in ${
+                  branchStatusMessage.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border-rose-200 text-rose-800'
+                }`}
+              >
+                {branchStatusMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                )}
+                <span className="font-medium">{branchStatusMessage.text}</span>
+              </div>
+            )}
+
+            <form onSubmit={(e) => handleAddNewBranch(e)} className="flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={newBranchInput}
+                  onChange={(e) => setNewBranchInput(e.target.value)}
+                  placeholder="พิมพ์ชื่อการไฟฟ้า เช่น กฟจ.ลำปาง, กฟจ.เชียงราย, กฟส.หางดง..."
+                  className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 bg-slate-50 focus:bg-white transition-all"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmittingBranch || !newBranchInput.trim()}
+                className="px-5 py-2.5 bg-purple-700 hover:bg-purple-800 disabled:opacity-50 text-white font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-xs transition-all shrink-0"
+              >
+                {isSubmittingBranch ? (
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Plus className="w-4 h-4" />
+                )}
+                <span>เพิ่มรายชื่อการไฟฟ้า</span>
+              </button>
+            </form>
+
+            {/* Quick Preset Suggestions */}
+            <div>
+              <p className="text-[11px] font-semibold text-slate-500 mb-2">
+                💡 คำแนะนำรายชื่อการไฟฟ้าทั่วไป (คลิกเพื่อเพิ่มทันที):
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {PRESET_BRANCH_SUGGESTIONS.filter((p) => !activePeaBranches.includes(p))
+                  .slice(0, 10)
+                  .map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => handleAddNewBranch(undefined, preset)}
+                      className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 active:scale-95"
+                    >
+                      <Plus className="w-3 h-3 text-purple-500" />
+                      <span>{preset}</span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          </div>
+
+          {/* List and Search of Registered Branches */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm sm:text-base flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-slate-700" />
+                  รายชื่อการไฟฟ้าในระบบทั้งหมด ({activePeaBranches.length} แห่ง)
+                </h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  รายชื่อด้านล่างนี้จะปรากฏในตัวเลือกของระบบตรวจสภาพและจัดกลุ่มยานพาหนะ
+                </p>
+              </div>
+
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={branchSearchTerm}
+                  onChange={(e) => setBranchSearchTerm(e.target.value)}
+                  placeholder="ค้นหาชื่อการไฟฟ้า..."
+                  className="w-full pl-9 pr-3 py-1.5 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 bg-slate-50"
+                />
+              </div>
+            </div>
+
+            {/* Branches Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {activePeaBranches
+                .filter((b) => b.toLowerCase().includes(branchSearchTerm.toLowerCase()))
+                .map((branch) => {
+                  const branchVehicles = vehicles.filter(
+                    (v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === branch
+                  );
+                  const branchAdmins = adminUsers.filter(
+                    (u) => (u.peaBranch || 'กฟภ. สำนักงานใหญ่') === branch
+                  );
+                  const isHeadquarters = branch === 'กฟภ. สำนักงานใหญ่';
+
+                  return (
+                    <div
+                      key={branch}
+                      className="p-4 rounded-xl border border-slate-200 bg-white hover:border-purple-200 hover:shadow-xs transition-all flex flex-col justify-between gap-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold shrink-0 ${
+                            isHeadquarters 
+                              ? 'bg-purple-100 text-purple-700' 
+                              : branchVehicles.length > 0 
+                              ? 'bg-blue-50 text-blue-700' 
+                              : 'bg-slate-100 text-slate-500'
+                          }`}>
+                            <Building2 className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="font-bold text-slate-900 text-sm block">
+                              {branch}
+                            </span>
+                            <span className="text-[10px] text-slate-400">
+                              {isHeadquarters ? 'สำนักงานใหญ่' : 'การไฟฟ้าส่วนภูมิภาค'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Delete Button */}
+                        <button
+                          type="button"
+                          onClick={() => setDeletingBranchName(branch)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-all"
+                          title={`ลบรายชื่อ ${branch}`}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Info & Tags */}
+                      <div className="space-y-2 pt-2 border-t border-slate-100">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-500">จำนวนยานพาหนะ:</span>
+                          <span className={`font-bold px-2 py-0.5 rounded-md ${
+                            branchVehicles.length > 0
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-slate-50 text-slate-500'
+                          }`}>
+                            {branchVehicles.length} คัน
+                          </span>
+                        </div>
+
+                        {branchVehicles.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {branchVehicles.slice(0, 3).map((v) => (
+                              <span
+                                key={v.id}
+                                className="text-[10px] font-mono px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded-md border border-slate-200"
+                              >
+                                {v.licensePlate}
+                              </span>
+                            ))}
+                            {branchVehicles.length > 3 && (
+                              <span className="text-[10px] text-slate-400 font-semibold self-center">
+                                +{branchVehicles.length - 3} คัน
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {branchAdmins.length > 0 && (
+                          <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+                            <span>ผู้ดูแลระบบสังกัด:</span>
+                            <span className="font-medium text-slate-700">{branchAdmins.length} ท่าน</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            {activePeaBranches.filter((b) => b.toLowerCase().includes(branchSearchTerm.toLowerCase())).length === 0 && (
+              <div className="py-8 text-center text-slate-400 text-xs">
+                ไม่พบรายชื่อการไฟฟ้าที่ตรงกับคำค้นหา "{branchSearchTerm}"
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* SubTab 6: Google Sheets Config & Status */}
+      {subTab === 'sheets_config' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Header Card */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <FileSpreadsheet className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-slate-900 text-base sm:text-lg">
+                    การเชื่อมโยง Google Sheets อัตโนมัติ (4 แผ่นงาน)
+                  </h3>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    เชื่อมโยงพร้อมใช้งาน
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                  ระบบถูกตั้งค่าให้บันทึกข้อมูลการตรวจ ยานพาหนะ และบัญชีผู้ดูแลระบบลงสเปรดชีต Google Sheets โดยตรง ผู้ใช้งานทั่วไปไม่ต้องกดซิงค์
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <a
+                href={sheetUrlInput || spreadsheetInfo?.url || 'https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-all"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>เปิดดู Google Sheets</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+
+              {onSyncAllSheets && (
+                <button
+                  onClick={async () => {
+                    setIsSyncingAllSheets(true);
+                    try {
+                      await onSyncAllSheets();
+                    } catch (err: any) {
+                      alert(err.message || 'ซิงค์ข้อมูลไม่สำเร็จ');
+                    } finally {
+                      setIsSyncingAllSheets(false);
+                    }
+                  }}
+                  disabled={isSyncingAllSheets}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-all disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isSyncingAllSheets ? 'animate-spin' : ''}`} />
+                  <span>{isSyncingAllSheets ? 'กำลังซิงค์...' : 'ซิงค์ข้อมูลทั้ง 4 แผ่นงานทันที'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 4 Sheets Breakdown Card */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 1</span>
+                <span className="p-1 rounded-lg bg-blue-50 text-blue-600">
+                  <ListChecks className="w-4 h-4" />
+                </span>
+              </div>
+              <h4 className="font-bold text-slate-900 text-sm">ประวัติการตรวจเช็ค</h4>
+              <p className="text-xs text-slate-500 mt-1">
+                บันทึกผลการตรวจสภาพรถทุกคัน ทะเบียน คนขับ เลขไมล์ ข้อชำรุด และผลการอนุมัติ
+              </p>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 2</span>
+                <span className="p-1 rounded-lg bg-amber-50 text-amber-600">
+                  <Car className="w-4 h-4" />
+                </span>
+              </div>
+              <h4 className="font-bold text-slate-900 text-sm">ข้อมูลยานพาหนะ</h4>
+              <p className="text-xs text-slate-500 mt-1">
+                ทะเบียน ยี่ห้อ รุ่น การไฟฟ้าที่สังกัด ประเภทรถ เชื้อเพลิง และสถานะพร้อมใช้งาน
+              </p>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 3</span>
+                <span className="p-1 rounded-lg bg-purple-50 text-purple-600">
+                  <Users className="w-4 h-4" />
+                </span>
+              </div>
+              <h4 className="font-bold text-slate-900 text-sm">ข้อมูลผู้ดูแลระบบ</h4>
+              <p className="text-xs text-slate-500 mt-1">
+                รายชื่อผู้ดูแลระบบ บทบาทสิทธิ์ (Super Admin, Admin, Supervisor) และสังกัด
+              </p>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 4</span>
+                <span className="p-1 rounded-lg bg-indigo-50 text-indigo-600">
+                  <Building className="w-4 h-4" />
+                </span>
+              </div>
+              <h4 className="font-bold text-slate-900 text-sm">สรุปแยกตามการไฟฟ้า</h4>
+              <p className="text-xs text-slate-500 mt-1">
+                สรุปยอดรวมรถและสถิติการตรวจสภาพประจำวันแยกตามแต่ละการไฟฟ้า (PEA Branch)
+              </p>
+            </div>
+          </div>
+
+          {/* Configuration Form Card */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+            <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+              <Settings className="w-4 h-4 text-slate-600" />
+              กำหนดลิงก์ Google Sheets ของระบบ
+            </h4>
+
+            {sheetSaveStatus && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{sheetSaveStatus}</span>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                URL ของ Google Spreadsheet (หรือ Spreadsheet ID)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={sheetUrlInput}
+                  onChange={(e) => setSheetUrlInput(e.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                  className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    let cleanId = sheetUrlInput.trim();
+                    const match = cleanId.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+                    if (match && match[1]) {
+                      cleanId = match[1];
+                    }
+                    const newInfo: SpreadsheetInfo = {
+                      id: cleanId,
+                      url: sheetUrlInput.startsWith('http') ? sheetUrlInput : `https://docs.google.com/spreadsheets/d/${cleanId}/edit`,
+                      title: 'ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน - กฟภ. (PEA)',
+                    };
+                    saveSpreadsheetInfo(newInfo);
+                    if (onUpdateSpreadsheetInfo) {
+                      onUpdateSpreadsheetInfo(newInfo);
+                    }
+                    setSheetSaveStatus('บันทึกการตั้งค่าลิงก์ Google Sheets เรียบร้อยแล้ว');
+                    setTimeout(() => setSheetSaveStatus(''), 4000);
+                  }}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shrink-0"
+                >
+                  บันทึกลิงก์
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">
+                สามารถเปลี่ยนลิงก์สเปรดชีตไปยังไฟล์อื่นของการไฟฟ้าได้ ระบบจะบันทึกข้อมูลเข้าชีตที่ระบุไว้โดยอัตโนมัติ
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       {adminUserModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
           <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col">
@@ -1031,6 +1666,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   }
                   className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  การไฟฟ้าที่สังกัด (PEA Branch)
+                </label>
+                <select
+                  value={adminUserFormData.peaBranch}
+                  onChange={(e) =>
+                    setAdminUserFormData({ ...adminUserFormData, peaBranch: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold bg-slate-50 text-slate-800"
+                >
+                  {activePeaBranches.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1137,6 +1791,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         onConfirm={handleConfirmDeleteAdmin}
         onCancel={() => setDeletingAdminUserId(null)}
       />
+
+      {/* Delete PEA Branch Confirmation Modal */}
+      {deletingBranchName && (
+        <ConfirmModal
+          isOpen={!!deletingBranchName}
+          title={`ยืนยันการลบรายชื่อการไฟฟ้า "${deletingBranchName}"`}
+          message={(() => {
+            const vehiclesCount = vehicles.filter(
+              (v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === deletingBranchName
+            ).length;
+            const adminsCount = adminUsers.filter(
+              (u) => (u.peaBranch || 'กฟภ. สำนักงานใหญ่') === deletingBranchName
+            ).length;
+            if (vehiclesCount > 0) {
+              const plates = vehicles
+                .filter((v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === deletingBranchName)
+                .map((v) => v.licensePlate)
+                .join(', ');
+              return `⚠️ คำเตือน: ตรวจพบยานพาหนะสังกัดการไฟฟ้านี้อยู่ ${vehiclesCount} คัน (ทะเบียน: ${plates}) และผู้ดูแลระบบ ${adminsCount} ท่าน!\n\nหากท่านลบรายชื่อนี้ รายชื่อจะถูกตัดออกจากตัวเลือกการไฟฟ้าในการลงทะเบียนรถใหม่ แต่ข้อมูลรถและประวัติเดิมจะยังคงอยู่\n\nคุณแน่ใจหรือไม่ว่าต้องการลบรายชื่อ "${deletingBranchName}" ออกจากระบบ?`;
+            }
+            return `คุณแน่ใจหรือไม่ว่าต้องการลบรายชื่อการไฟฟ้า "${deletingBranchName}" ออกจากระบบ?\n\nเมื่อลบแล้วจะไม่แสดงในตัวเลือกของระบบอีก`;
+          })()}
+          confirmLabel="ลบรายชื่อการไฟฟ้า"
+          cancelLabel="ยกเลิก"
+          isDestructive={true}
+          onConfirm={handleConfirmDeleteBranch}
+          onCancel={() => setDeletingBranchName(null)}
+        />
+      )}
 
       {/* Add / Edit Checklist Item Modal */}
       {itemModalOpen && editingItemData && (

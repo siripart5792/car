@@ -26,6 +26,7 @@ import { ConfirmModal } from './ConfirmModal';
 interface InspectionHistoryProps {
   records: InspectionRecord[];
   vehicles: Vehicle[];
+  peaBranches?: string[];
   filterVehicleId?: string | null;
   onDeleteRecord: (recordId: string) => void;
   onOpenSheets?: () => void;
@@ -56,11 +57,13 @@ const OVERALL_STATUS_BADGES: Record<OverallStatus, { label: string; bg: string; 
 export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
   records,
   vehicles,
+  peaBranches,
   filterVehicleId: initialFilterVehicleId,
   onDeleteRecord,
   onOpenSheets,
   isSheetsConnected,
 }) => {
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>('all');
   const [selectedVehicleFilter, setSelectedVehicleFilter] = useState<string>(
     initialFilterVehicleId || 'all'
   );
@@ -71,7 +74,13 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
   const [activeRecord, setActiveRecord] = useState<InspectionRecord | null>(null);
   const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null);
 
+  const availableBranches = Array.from(
+    new Set([...(peaBranches || []), ...records.map((r) => r.peaBranch || 'กฟภ. สำนักงานใหญ่')])
+  );
+
   const filteredRecords = records.filter((rec) => {
+    const matchesBranch =
+      selectedBranchFilter === 'all' || (rec.peaBranch || 'กฟภ. สำนักงานใหญ่') === selectedBranchFilter;
     const matchesVehicle =
       selectedVehicleFilter === 'all' || rec.vehicleId === selectedVehicleFilter;
     const matchesCategory =
@@ -80,12 +89,13 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
       selectedStatusFilter === 'all' || rec.overallStatus === selectedStatusFilter;
     const matchesSearch =
       rec.vehicleLicensePlate.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (rec.peaBranch && rec.peaBranch.toLowerCase().includes(searchTerm.toLowerCase())) ||
       rec.inspectorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       rec.brand.toLowerCase().includes(searchTerm.toLowerCase()) ||
       rec.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (rec.workDescription && rec.workDescription.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    return matchesVehicle && matchesCategory && matchesStatus && matchesSearch;
+    return matchesBranch && matchesVehicle && matchesCategory && matchesStatus && matchesSearch;
   });
 
   const deletingRecord = records.find((r) => r.id === deletingRecordId);
@@ -104,7 +114,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
             ประวัติการตรวจเช็คสภาพยานพาหนะย้อนหลัง
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            เก็บบันทึกข้อมูลการตรวจสอบย้อนหลังของรถแต่ละคัน ตรวจดูข้อบกพร่อง และประเมินความปลอดภัย ({records.length} รายการ)
+            เก็บบันทึกข้อมูลการตรวจสอบย้อนหลังของรถแต่ละคัน แยกการไฟฟ้า ตรวจดูข้อบกพร่อง ({records.length} รายการ)
           </p>
         </div>
 
@@ -121,7 +131,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
 
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
@@ -131,6 +141,21 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-slate-800"
             />
+          </div>
+
+          <div>
+            <select
+              value={selectedBranchFilter}
+              onChange={(e) => setSelectedBranchFilter(e.target.value)}
+              className="w-full px-3 py-2 bg-indigo-50/70 border border-indigo-200 text-indigo-900 font-bold rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+            >
+              <option value="all">⚡ ทุกการไฟฟ้า</option>
+              {availableBranches.map((branch) => (
+                <option key={branch} value={branch}>
+                  {branch}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>
@@ -175,12 +200,13 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
           </div>
         </div>
 
-        {(searchTerm || selectedCategoryFilter !== 'all' || selectedVehicleFilter !== 'all' || selectedStatusFilter !== 'all') && (
+        {(searchTerm || selectedBranchFilter !== 'all' || selectedCategoryFilter !== 'all' || selectedVehicleFilter !== 'all' || selectedStatusFilter !== 'all') && (
           <div className="flex items-center justify-between text-xs text-slate-500 pt-2 border-t border-slate-100">
             <span>แสดง {filteredRecords.length} รายการ จากทั้งหมด {records.length} รายการ</span>
             <button
               onClick={() => {
                 setSearchTerm('');
+                setSelectedBranchFilter('all');
                 setSelectedCategoryFilter('all');
                 setSelectedVehicleFilter('all');
                 setSelectedStatusFilter('all');
@@ -226,6 +252,9 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
                       </span>
                       <span className="font-semibold text-slate-800 text-sm">
                         {rec.brand} {rec.model}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] font-bold">
+                        ⚡ {rec.peaBranch || 'กฟภ. สำนักงานใหญ่'}
                       </span>
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border ${
                         rec.vehicleCategory === 'bucket_truck_class_c'

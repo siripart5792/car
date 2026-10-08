@@ -1,6 +1,8 @@
-import { Vehicle, InspectionRecord } from '../types/vehicle';
+import { Vehicle, InspectionRecord, AdminUser } from '../types/vehicle';
 
 const SPREADSHEET_STORAGE_KEY = 'vehicle_inspection_spreadsheet_id';
+const SPREADSHEET_INFO_STORAGE_KEY = 'vehicle_inspection_spreadsheet_info_v3';
+const WEBHOOK_URL_STORAGE_KEY = 'vehicle_inspection_webhook_url';
 
 export interface SpreadsheetInfo {
   id: string;
@@ -14,7 +16,7 @@ export const VEHICLE_CATEGORY_LABELS: Record<string, string> = {
   bucket_truck_class_c: 'รถกระเช้า Class C',
 };
 
-const VEHICLE_TYPE_LABELS: Record<string, string> = {
+export const VEHICLE_TYPE_LABELS: Record<string, string> = {
   pickup: 'รถกระบะ / ปิคอัพ',
   truck: 'รถบรรทุก 6 ล้อ / 10 ล้อ',
   van: 'รถตู้ / รถตู้โดยสาร',
@@ -26,35 +28,50 @@ const VEHICLE_TYPE_LABELS: Record<string, string> = {
   other: 'ยานพาหนะอื่นๆ',
 };
 
-const STATUS_LABELS: Record<string, string> = {
+export const STATUS_LABELS: Record<string, string> = {
   ready: 'พร้อมใช้งาน',
   needs_attention: 'มีข้อสังเกต/ต้องดูแล',
   maintenance: 'ส่งซ่อม/ระงับใช้',
 };
 
-const OVERALL_STATUS_LABELS: Record<string, string> = {
+export const OVERALL_STATUS_LABELS: Record<string, string> = {
   ready: 'พร้อมใช้งาน (ผ่าน)',
   conditional: 'พร้อมใช้งานแบบมีข้อสังเกต',
   not_ready: 'ไม่พร้อมใช้งาน (ห้ามขับ/ห้ามยก)',
 };
 
-const SPREADSHEET_INFO_STORAGE_KEY = 'vehicle_inspection_spreadsheet_info_v2';
+export const ADMIN_ROLE_LABELS: Record<string, string> = {
+  super_admin: 'ผู้ดูแลระบบหลัก (Super Admin)',
+  admin: 'ผู้ดูแลระบบ (Admin)',
+  supervisor: 'หัวหน้างานตรวจสภาพ (Supervisor)',
+};
 
-export const getSavedSpreadsheetId = (): string | null => {
-  return localStorage.getItem(SPREADSHEET_STORAGE_KEY);
+export const DEFAULT_SPREADSHEET_ID = '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms';
+export const DEFAULT_SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}/edit`;
+
+export const DEFAULT_SPREADSHEET_INFO: SpreadsheetInfo = {
+  id: DEFAULT_SPREADSHEET_ID,
+  url: DEFAULT_SPREADSHEET_URL,
+  title: 'ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน - การไฟฟ้าส่วนภูมิภาค (PEA)',
+};
+
+export const getSavedSpreadsheetId = (): string => {
+  return localStorage.getItem(SPREADSHEET_STORAGE_KEY) || DEFAULT_SPREADSHEET_ID;
 };
 
 export const saveSpreadsheetId = (id: string): void => {
   localStorage.setItem(SPREADSHEET_STORAGE_KEY, id);
 };
 
-export const getSavedSpreadsheetInfo = (): SpreadsheetInfo | null => {
+export const getSavedSpreadsheetInfo = (): SpreadsheetInfo => {
   try {
     const raw = localStorage.getItem(SPREADSHEET_INFO_STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
+    if (!raw) return DEFAULT_SPREADSHEET_INFO;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.id || !parsed.url) return DEFAULT_SPREADSHEET_INFO;
+    return parsed;
   } catch (e) {
-    return null;
+    return DEFAULT_SPREADSHEET_INFO;
   }
 };
 
@@ -65,6 +82,14 @@ export const saveSpreadsheetInfo = (info: SpreadsheetInfo): void => {
   } catch (e) {
     // ignore
   }
+};
+
+export const getSavedWebhookUrl = (): string => {
+  return localStorage.getItem(WEBHOOK_URL_STORAGE_KEY) || '';
+};
+
+export const saveWebhookUrl = (url: string): void => {
+  localStorage.setItem(WEBHOOK_URL_STORAGE_KEY, url.trim());
 };
 
 export const clearSpreadsheetId = (): void => {
@@ -78,7 +103,7 @@ export const clearSpreadsheetId = (): void => {
 export async function getOrCreateSpreadsheet(accessToken: string): Promise<SpreadsheetInfo> {
   const existingId = getSavedSpreadsheetId();
 
-  if (existingId) {
+  if (existingId && existingId !== DEFAULT_SPREADSHEET_ID) {
     try {
       const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${existingId}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -98,22 +123,34 @@ export async function getOrCreateSpreadsheet(accessToken: string): Promise<Sprea
     }
   }
 
-  // Create new spreadsheet
+  // Create new spreadsheet with 4 dedicated sheets
   const newSheetPayload = {
     properties: {
-      title: `ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน - บันทึกข้อมูล`,
+      title: `ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน - กฟภ. (PEA)`,
     },
     sheets: [
       {
         properties: {
           title: 'ประวัติการตรวจเช็ค',
-          gridProperties: { rowCount: 150, columnCount: 18 },
+          gridProperties: { rowCount: 500, columnCount: 20 },
         },
       },
       {
         properties: {
           title: 'ข้อมูลยานพาหนะ',
-          gridProperties: { rowCount: 60, columnCount: 14 },
+          gridProperties: { rowCount: 150, columnCount: 16 },
+        },
+      },
+      {
+        properties: {
+          title: 'ข้อมูลผู้ดูแลระบบ',
+          gridProperties: { rowCount: 60, columnCount: 12 },
+        },
+      },
+      {
+        properties: {
+          title: 'สรุปแยกตามการไฟฟ้า',
+          gridProperties: { rowCount: 60, columnCount: 12 },
         },
       },
     ],
@@ -143,17 +180,18 @@ export async function getOrCreateSpreadsheet(accessToken: string): Promise<Sprea
   const info: SpreadsheetInfo = {
     id: spreadsheetId,
     url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`,
-    title: createdData.properties?.title || 'ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน',
+    title: createdData.properties?.title || 'ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน - กฟภ.',
   };
   saveSpreadsheetInfo(info);
   return info;
 }
 
-async function initializeHeaders(accessToken: string, spreadsheetId: string) {
+export async function initializeHeaders(accessToken: string, spreadsheetId: string) {
   const inspectionHeaders = [
     [
       'รหัสการตรวจ',
       'วัน-เวลาที่ตรวจ',
+      'การไฟฟ้าที่สังกัด',
       'ทะเบียนรถ',
       'ประเภทกลุ่มรถ',
       'ประเภทย่อย',
@@ -174,6 +212,7 @@ async function initializeHeaders(accessToken: string, spreadsheetId: string) {
   const vehicleHeaders = [
     [
       'รหัสรถ',
+      'การไฟฟ้าที่สังกัด',
       'ทะเบียนรถ',
       'จังหวัด',
       'ประเภทกลุ่มรถ',
@@ -189,33 +228,92 @@ async function initializeHeaders(accessToken: string, spreadsheetId: string) {
     ],
   ];
 
-  await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ประวัติการตรวจเช็ค'!A1:P1?valueInputOption=USER_ENTERED`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ values: inspectionHeaders }),
-    }
-  );
+  const adminHeaders = [
+    [
+      'รหัสผู้ดูแล',
+      'ชื่อผู้ใช้ (Username)',
+      'รหัสผ่าน (Password)',
+      'ชื่อ-นามสกุล / ตำแหน่ง',
+      'ระดับสิทธิ์ (Role)',
+      'การไฟฟ้าที่สังกัด',
+      'อีเมล',
+      'เบอร์โทรศัพท์',
+      'สถานะ',
+      'วันที่สร้าง',
+      'อัปเดตล่าสุด',
+    ],
+  ];
 
-  await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ข้อมูลยานพาหนะ'!A1:M1?valueInputOption=USER_ENTERED`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ values: vehicleHeaders }),
-    }
-  );
+  const summaryHeaders = [
+    [
+      'การไฟฟ้าที่สังกัด',
+      'จำนวนรถทั้งหมด (คัน)',
+      'รถทั่วไป (คัน)',
+      'รถบรรทุกติดเครน (คัน)',
+      'รถกระเช้า Class C (คัน)',
+      'ตรวจแล้ววันนี้ (คัน)',
+      'ยังไม่ตรวจวันนี้ (คัน)',
+      'สถานะพร้อมใช้งาน (คัน)',
+      'ต้องดูแล / ส่งซ่อม (คัน)',
+      'อัปเดตล่าสุด',
+    ],
+  ];
+
+  try {
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ประวัติการตรวจเช็ค'!A1:Q1?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values: inspectionHeaders }),
+      }
+    );
+
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ข้อมูลยานพาหนะ'!A1:N1?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values: vehicleHeaders }),
+      }
+    );
+
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ข้อมูลผู้ดูแลระบบ'!A1:K1?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values: adminHeaders }),
+      }
+    );
+
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'สรุปแยกตามการไฟฟ้า'!A1:J1?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ values: summaryHeaders }),
+      }
+    );
+  } catch (err) {
+    console.warn('Error writing headers to sheets:', err);
+  }
 }
 
 /**
- * Sync entire fleet list to Google Sheet
+ * Sync entire fleet list to Google Sheet (separated by PEA branch)
  */
 export async function syncVehiclesToSheet(
   accessToken: string,
@@ -225,6 +323,7 @@ export async function syncVehiclesToSheet(
   const rows = [
     [
       'รหัสรถ',
+      'การไฟฟ้าที่สังกัด',
       'ทะเบียนรถ',
       'จังหวัด',
       'ประเภทกลุ่มรถ',
@@ -240,9 +339,10 @@ export async function syncVehiclesToSheet(
     ],
     ...vehicles.map((v) => [
       v.id,
+      v.peaBranch || 'กฟภ. สำนักงานใหญ่',
       v.licensePlate,
       v.province,
-      VEHICLE_CATEGORY_LABELS[v.category] || (v.category === 'crane_truck' ? 'รถบรรทุกติดเครนไฮดรอลิค' : 'ยานพาหนะทั่วไป'),
+      VEHICLE_CATEGORY_LABELS[v.category] || (v.category === 'crane_truck' ? 'รถบรรทุกติดเครนไฮดรอลิค' : v.category === 'bucket_truck_class_c' ? 'รถกระเช้า Class C' : 'ยานพาหนะทั่วไป'),
       VEHICLE_TYPE_LABELS[v.vehicleType] || v.vehicleType,
       v.brand,
       v.model,
@@ -256,7 +356,7 @@ export async function syncVehiclesToSheet(
   ];
 
   await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ข้อมูลยานพาหนะ'!A1:M${Math.max(rows.length + 10, 100)}:clear`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ข้อมูลยานพาหนะ'!A1:N${Math.max(rows.length + 10, 100)}:clear`,
     {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -300,8 +400,9 @@ export async function appendInspectionToSheet(
   const row = [
     record.id,
     formattedDate,
+    record.peaBranch || 'กฟภ. สำนักงานใหญ่',
     record.vehicleLicensePlate,
-    VEHICLE_CATEGORY_LABELS[record.vehicleCategory] || (record.vehicleCategory === 'crane_truck' ? 'รถบรรทุกติดเครนไฮดรอลิค' : 'ยานพาหนะทั่วไป'),
+    VEHICLE_CATEGORY_LABELS[record.vehicleCategory] || (record.vehicleCategory === 'crane_truck' ? 'รถบรรทุกติดเครนไฮดรอลิค' : record.vehicleCategory === 'bucket_truck_class_c' ? 'รถกระเช้า Class C' : 'ยานพาหนะทั่วไป'),
     VEHICLE_TYPE_LABELS[record.vehicleType] || record.vehicleType,
     `${record.brand} ${record.model}`,
     record.odometer,
@@ -317,7 +418,7 @@ export async function appendInspectionToSheet(
   ];
 
   const res = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ประวัติการตรวจเช็ค'!A:P:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ประวัติการตรวจเช็ค'!A:Q:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     {
       method: 'POST',
       headers: {
@@ -345,6 +446,7 @@ export async function syncAllInspectionsToSheet(
   const header = [
     'รหัสการตรวจ',
     'วัน-เวลาที่ตรวจ',
+    'การไฟฟ้าที่สังกัด',
     'ทะเบียนรถ',
     'ประเภทกลุ่มรถ',
     'ประเภทย่อย',
@@ -373,8 +475,9 @@ export async function syncAllInspectionsToSheet(
       return [
         r.id,
         new Date(r.inspectionDate).toLocaleString('th-TH'),
+        r.peaBranch || 'กฟภ. สำนักงานใหญ่',
         r.vehicleLicensePlate,
-        VEHICLE_CATEGORY_LABELS[r.vehicleCategory] || (r.vehicleCategory === 'crane_truck' ? 'รถบรรทุกติดเครนไฮดรอลิค' : 'ยานพาหนะทั่วไป'),
+        VEHICLE_CATEGORY_LABELS[r.vehicleCategory] || (r.vehicleCategory === 'crane_truck' ? 'รถบรรทุกติดเครนไฮดรอลิค' : r.vehicleCategory === 'bucket_truck_class_c' ? 'รถกระเช้า Class C' : 'ยานพาหนะทั่วไป'),
         VEHICLE_TYPE_LABELS[r.vehicleType] || r.vehicleType,
         `${r.brand} ${r.model}`,
         r.odometer,
@@ -392,7 +495,7 @@ export async function syncAllInspectionsToSheet(
   ];
 
   await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ประวัติการตรวจเช็ค'!A1:P${Math.max(rows.length + 20, 200)}:clear`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ประวัติการตรวจเช็ค'!A1:Q${Math.max(rows.length + 20, 200)}:clear`,
     {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -413,5 +516,155 @@ export async function syncAllInspectionsToSheet(
 
   if (!res.ok) {
     throw new Error('ไม่สามารถซิงค์ประวัติการตรวจเช็คลง Google Sheets ได้');
+  }
+}
+
+/**
+ * Sync Admin Users to Google Sheet (Tab: 'ข้อมูลผู้ดูแลระบบ')
+ */
+export async function syncAdminUsersToSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  adminUsers: AdminUser[]
+): Promise<void> {
+  const rows = [
+    [
+      'รหัสผู้ดูแล',
+      'ชื่อผู้ใช้ (Username)',
+      'รหัสผ่าน (Password)',
+      'ชื่อ-นามสกุล / ตำแหน่ง',
+      'ระดับสิทธิ์ (Role)',
+      'การไฟฟ้าที่สังกัด',
+      'อีเมล',
+      'เบอร์โทรศัพท์',
+      'สถานะ',
+      'วันที่สร้าง',
+      'อัปเดตล่าสุด',
+    ],
+    ...adminUsers.map((u) => [
+      u.id,
+      u.username,
+      u.password,
+      u.displayName,
+      ADMIN_ROLE_LABELS[u.role] || u.role,
+      u.peaBranch || 'กฟภ. สำนักงานใหญ่',
+      u.email || '-',
+      u.phone || '-',
+      u.status === 'active' ? 'เปิดใช้งาน' : 'ระงับการใช้งาน',
+      new Date(u.createdAt).toLocaleString('th-TH'),
+      new Date(u.updatedAt).toLocaleString('th-TH'),
+    ]),
+  ];
+
+  await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ข้อมูลผู้ดูแลระบบ'!A1:K${Math.max(rows.length + 10, 50)}:clear`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'ข้อมูลผู้ดูแลระบบ'!A1?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ values: rows }),
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error('ไม่สามารถบันทึกข้อมูลผู้ดูแลระบบลง Google Sheets ได้');
+  }
+}
+
+/**
+ * Sync PEA Branch Summary to Google Sheet (Tab: 'สรุปแยกตามการไฟฟ้า')
+ */
+export async function syncBranchSummaryToSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  vehicles: Vehicle[],
+  inspections: InspectionRecord[],
+  managedBranches?: string[]
+): Promise<void> {
+  // Group vehicles by PEA branch, including any managed branches
+  const branchPool = managedBranches && managedBranches.length > 0
+    ? [...managedBranches, ...vehicles.map((v) => v.peaBranch || 'กฟภ. สำนักงานใหญ่')]
+    : vehicles.map((v) => v.peaBranch || 'กฟภ. สำนักงานใหญ่');
+  const branches = Array.from(new Set(branchPool));
+
+  // Check today inspections
+  const todayStr = new Date().toISOString().split('T')[0];
+  const inspectedTodayVehicles = new Set(
+    inspections
+      .filter((i) => i.inspectionDate.startsWith(todayStr))
+      .map((i) => i.vehicleId)
+  );
+
+  const rows = [
+    [
+      'การไฟฟ้าที่สังกัด',
+      'จำนวนรถทั้งหมด (คัน)',
+      'รถทั่วไป (คัน)',
+      'รถบรรทุกติดเครน (คัน)',
+      'รถกระเช้า Class C (คัน)',
+      'ตรวจแล้ววันนี้ (คัน)',
+      'ยังไม่ตรวจวันนี้ (คัน)',
+      'สถานะพร้อมใช้งาน (คัน)',
+      'ต้องดูแล / ส่งซ่อม (คัน)',
+      'อัปเดตล่าสุด',
+    ],
+    ...branches.map((b) => {
+      const bVehicles = vehicles.filter((v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === b);
+      const total = bVehicles.length;
+      const general = bVehicles.filter((v) => v.category === 'general').length;
+      const crane = bVehicles.filter((v) => v.category === 'crane_truck').length;
+      const bucket = bVehicles.filter((v) => v.category === 'bucket_truck_class_c').length;
+      const inspected = bVehicles.filter((v) => inspectedTodayVehicles.has(v.id)).length;
+      const uninspected = total - inspected;
+      const ready = bVehicles.filter((v) => v.status === 'ready').length;
+      const notReady = total - ready;
+
+      return [
+        b,
+        total,
+        general,
+        crane,
+        bucket,
+        inspected,
+        uninspected,
+        ready,
+        notReady,
+        new Date().toLocaleString('th-TH'),
+      ];
+    }),
+  ];
+
+  await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'สรุปแยกตามการไฟฟ้า'!A1:J${Math.max(rows.length + 10, 50)}:clear`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+
+  const res = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'สรุปแยกตามการไฟฟ้า'!A1?valueInputOption=USER_ENTERED`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ values: rows }),
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error('ไม่สามารถบันทึกข้อมูลสรุปแยกตามการไฟฟ้าลง Google Sheets ได้');
   }
 }

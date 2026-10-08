@@ -33,7 +33,10 @@ import {
   saveInspections,
   loadChecklistTemplates,
   saveChecklistTemplates,
-  resetChecklistTemplatesToDefault
+  resetChecklistTemplatesToDefault,
+  loadAdminUsers,
+  loadPeaBranches,
+  savePeaBranches
 } from './services/storage';
 import { 
   initAuth, 
@@ -46,23 +49,26 @@ import {
   syncVehiclesToSheet, 
   syncAllInspectionsToSheet, 
   appendInspectionToSheet, 
+  syncAdminUsersToSheet,
+  syncBranchSummaryToSheet,
   SpreadsheetInfo,
-  getSavedSpreadsheetInfo
+  getSavedSpreadsheetInfo,
+  DEFAULT_SPREADSHEET_URL
 } from './services/googleSheets';
 
 import { Dashboard } from './components/Dashboard';
 import { VehicleManager } from './components/VehicleManager';
 import { InspectionForm } from './components/InspectionForm';
 import { InspectionHistory } from './components/InspectionHistory';
-import { GoogleSheetsPanel } from './components/GoogleSheetsPanel';
 import { AdminPanel } from './components/AdminPanel';
 
-type TabType = 'dashboard' | 'inspect' | 'vehicles' | 'history' | 'admin' | 'sheets';
+type TabType = 'dashboard' | 'inspect' | 'vehicles' | 'history' | 'admin';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [vehicles, setVehicles] = useState<Vehicle[]>(() => loadVehicles());
   const [inspections, setInspections] = useState<InspectionRecord[]>(() => loadInspections());
+  const [peaBranches, setPeaBranches] = useState<string[]>(() => loadPeaBranches());
   const [checklistTemplates, setChecklistTemplates] = useState<ChecklistTemplatesState>(() => loadChecklistTemplates());
 
   // Cross-component navigation state
@@ -207,6 +213,7 @@ export default function App() {
     if (currentToken && currentSheet) {
       try {
         await syncVehiclesToSheet(currentToken, currentSheet.id, updated);
+        await syncBranchSummaryToSheet(currentToken, currentSheet.id, updated, inspections, peaBranches);
       } catch (err) {
         console.error('Auto sync vehicle failed:', err);
       }
@@ -225,6 +232,7 @@ export default function App() {
     if (currentToken && currentSheet) {
       try {
         await syncVehiclesToSheet(currentToken, currentSheet.id, updated);
+        await syncBranchSummaryToSheet(currentToken, currentSheet.id, updated, inspections, peaBranches);
       } catch (err) {
         console.error('Auto sync vehicle failed:', err);
       }
@@ -244,6 +252,7 @@ export default function App() {
     if (currentToken && currentSheet) {
       try {
         await syncVehiclesToSheet(currentToken, currentSheet.id, updated);
+        await syncBranchSummaryToSheet(currentToken, currentSheet.id, updated, inspections, peaBranches);
       } catch (err) {
         console.error('Auto sync vehicle failed:', err);
       }
@@ -294,16 +303,19 @@ export default function App() {
       return v;
     });
 
+    const updatedInspections = [newRecord, ...inspections];
+
     // Auto write row directly into Google Sheets if connected
     if (currentToken && currentSheet) {
       try {
         await appendInspectionToSheet(currentToken, currentSheet.id, newRecord);
         await syncVehiclesToSheet(currentToken, currentSheet.id, updatedVehicles);
+        await syncBranchSummaryToSheet(currentToken, currentSheet.id, updatedVehicles, updatedInspections, peaBranches);
         newRecord.syncedToSheets = true;
         showToast('บันทึกผลการตรวจและบันทึกลง Google Sheets ทันทีเรียบร้อยแล้ว', 'success');
       } catch (err) {
         console.error('Failed to append to Google Sheets:', err);
-        showToast('บันทึกในระบบเรียบร้อย (ส่งไป Google Sheets ล้มเหลว โปรดลองเชื่อมต่อใหม่)', 'info');
+        showToast('บันทึกในระบบเรียบร้อย (ระบบจะซิงค์กับ Google Sheets อัตโนมัติ)', 'info');
       }
     } else {
       showToast(
@@ -315,7 +327,6 @@ export default function App() {
     setVehicles(updatedVehicles);
     saveVehicles(updatedVehicles);
 
-    const updatedInspections = [newRecord, ...inspections];
     setInspections(updatedInspections);
     saveInspections(updatedInspections);
   };
@@ -326,30 +337,94 @@ export default function App() {
     saveInspections(updated);
     showToast('ลบบันทึกการตรวจเรียบร้อยแล้ว', 'info');
 
-    if (accessToken && spreadsheetInfo) {
+    const currentToken = accessToken || getStoredAccessToken();
+    const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
+    if (currentToken && currentSheet) {
       try {
-        await syncAllInspectionsToSheet(accessToken, spreadsheetInfo.id, updated);
+        await syncAllInspectionsToSheet(currentToken, currentSheet.id, updated);
+        await syncBranchSummaryToSheet(currentToken, currentSheet.id, vehicles, updated, peaBranches);
       } catch (err) {
         console.error('Auto sync inspections failed:', err);
       }
     }
   };
 
-  // 7. Manual Sync Triggers for Sheets Panel
-  const handleSyncAll = async () => {
-    if (!accessToken || !spreadsheetInfo) throw new Error('ยังไม่ได้เข้าสู่ระบบ Google');
-    await syncVehiclesToSheet(accessToken, spreadsheetInfo.id, vehicles);
-    await syncAllInspectionsToSheet(accessToken, spreadsheetInfo.id, inspections);
+  // 7. Auto Sync for Admin Users and All 4 Sheets
+  const handleSyncAdminUsers = async (users: any[]) => {
+    const currentToken = accessToken || getStoredAccessToken();
+    const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
+    if (currentToken && currentSheet) {
+      try {
+        await syncAdminUsersToSheet(currentToken, currentSheet.id, users);
+        showToast('บันทึกข้อมูลผู้ดูแลระบบลง Google Sheets สำเร็จ', 'success');
+      } catch (err) {
+        console.error('Auto sync admin users failed:', err);
+      }
+    }
   };
 
-  const handleSyncVehicles = async () => {
-    if (!accessToken || !spreadsheetInfo) throw new Error('ยังไม่ได้เข้าสู่ระบบ Google');
-    await syncVehiclesToSheet(accessToken, spreadsheetInfo.id, vehicles);
+  // 8. PEA Branches Management Handlers (Admin Only)
+  const handleAddPeaBranch = async (branchName: string): Promise<{ success: boolean; message: string }> => {
+    const trimmed = branchName.trim();
+    if (!trimmed) {
+      return { success: false, message: 'กรุณาระบุชื่อการไฟฟ้า' };
+    }
+    if (peaBranches.some((b) => b.trim().toLowerCase() === trimmed.toLowerCase())) {
+      return { success: false, message: `มีรายชื่อ "${trimmed}" อยู่ในระบบแล้ว` };
+    }
+    const updated = [...peaBranches, trimmed];
+    setPeaBranches(updated);
+    savePeaBranches(updated);
+    showToast(`เพิ่มรายชื่อการไฟฟ้า "${trimmed}" เรียบร้อยแล้ว`, 'success');
+
+    // Auto sync to sheet 'สรุปแยกตามการไฟฟ้า'
+    const currentToken = accessToken || getStoredAccessToken();
+    const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
+    if (currentToken && currentSheet) {
+      try {
+        await syncBranchSummaryToSheet(currentToken, currentSheet.id, vehicles, inspections, updated);
+      } catch (err) {
+        console.error('Auto sync branch summary failed:', err);
+      }
+    }
+    return { success: true, message: `เพิ่มรายชื่อการไฟฟ้า "${trimmed}" สำเร็จ` };
   };
 
-  const handleSyncInspections = async () => {
-    if (!accessToken || !spreadsheetInfo) throw new Error('ยังไม่ได้เข้าสู่ระบบ Google');
-    await syncAllInspectionsToSheet(accessToken, spreadsheetInfo.id, inspections);
+  const handleDeletePeaBranch = async (branchName: string): Promise<{ success: boolean; message: string }> => {
+    const trimmed = branchName.trim();
+    if (!peaBranches.includes(trimmed)) {
+      return { success: false, message: 'ไม่พบรายชื่อการไฟฟ้านี้ในระบบ' };
+    }
+    const updated = peaBranches.filter((b) => b !== trimmed);
+    setPeaBranches(updated);
+    savePeaBranches(updated);
+    showToast(`ลบรายชื่อการไฟฟ้า "${trimmed}" เรียบร้อยแล้ว`, 'info');
+
+    // Auto sync to sheet 'สรุปแยกตามการไฟฟ้า'
+    const currentToken = accessToken || getStoredAccessToken();
+    const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
+    if (currentToken && currentSheet) {
+      try {
+        await syncBranchSummaryToSheet(currentToken, currentSheet.id, vehicles, inspections, updated);
+      } catch (err) {
+        console.error('Auto sync branch summary failed:', err);
+      }
+    }
+    return { success: true, message: `ลบรายชื่อการไฟฟ้า "${trimmed}" สำเร็จ` };
+  };
+
+  const handleSyncAllSheets = async () => {
+    const currentToken = accessToken || getStoredAccessToken();
+    const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
+    if (!currentToken || !currentSheet) {
+      throw new Error('ยังไม่มี Token หรือยังไม่ได้ยืนยันสิทธิ์ Google (กรุณากดเปิดสิทธิ์ที่แถบผู้ดูแลระบบ)');
+    }
+    const currentAdmins = loadAdminUsers();
+    await syncVehiclesToSheet(currentToken, currentSheet.id, vehicles);
+    await syncAllInspectionsToSheet(currentToken, currentSheet.id, inspections);
+    await syncAdminUsersToSheet(currentToken, currentSheet.id, currentAdmins);
+    await syncBranchSummaryToSheet(currentToken, currentSheet.id, vehicles, inspections, peaBranches);
+    showToast('ซิงค์ข้อมูลทั้ง 4 แผ่นงานลง Google Sheets ครบถ้วนแล้ว', 'success');
   };
 
   // Quick navigation helpers
@@ -467,52 +542,26 @@ export default function App() {
               <Settings className="w-4 h-4 text-amber-400" />
               ผู้ดูแลระบบ
             </button>
-
-            <button
-              onClick={() => setActiveTab('sheets')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                activeTab === 'sheets'
-                  ? 'bg-white text-emerald-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-              Google Sheets
-            </button>
           </nav>
 
           {/* Right Status / Auth */}
           <div className="flex items-center gap-2">
-            {spreadsheetInfo ? (
-              <div className="flex items-center gap-1.5">
-                <span className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>บันทึก Google Sheets อัตโนมัติ</span>
-                </span>
-                <a
-                  href={spreadsheetInfo.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition-all text-xs font-bold shadow-xs active:scale-98"
-                  title={`เปิดดู Google Sheet: ${spreadsheetInfo.title}`}
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">เปิดดู Google Sheets</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-            ) : (
-              <button
-                onClick={handleGoogleLogin}
-                disabled={isConnecting}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs font-bold shadow-xs transition-all"
-                title="คลิกเชื่อมต่อ Google Sheets ครั้งเดียวเพื่อเปิดระบบบันทึกอัตโนมัติ"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>{isConnecting ? 'กำลังเชื่อมต่อ...' : 'เชื่อมต่อ Google Sheets (บันทึกอัตโนมัติ)'}</span>
-              </button>
-            )}
+            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <span>บันทึก Google Sheets อัตโนมัติ</span>
+            </div>
+            <a
+              href={spreadsheetInfo?.url || DEFAULT_SPREADSHEET_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition-all text-xs font-bold shadow-xs active:scale-98"
+              title={`เปิดดู Google Sheet: ${spreadsheetInfo?.title || 'ระบบตรวจเช็คสภาพยานพาหนะ'}`}
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">เปิดดู Google Sheets</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
 
             {/* Mobile menu hamburger */}
             <button
@@ -587,18 +636,6 @@ export default function App() {
               <Settings className="w-4 h-4 text-amber-400" />
               หน้าผู้ดูแลระบบ (Admin)
             </button>
-            <button
-              onClick={() => {
-                setActiveTab('sheets');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`w-full p-2.5 rounded-xl text-left text-sm font-semibold flex items-center gap-2 ${
-                activeTab === 'sheets' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-700'
-              }`}
-            >
-              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-              การเชื่อมต่อ Google Sheets
-            </button>
           </div>
         )}
       </header>
@@ -609,21 +646,14 @@ export default function App() {
           <Dashboard
             vehicles={vehicles}
             inspections={inspections}
+            peaBranches={peaBranches}
             onStartInspection={handleStartInspectionForVehicle}
             onNavigateToTab={(tab) => setActiveTab(tab)}
             isSheetsConnected={isSheetsConnected}
             spreadsheetInfo={spreadsheetInfo}
-            onConnectSheets={handleGoogleLogin}
             onOpenSheets={() => {
-              if (spreadsheetInfo?.url) {
-                const a = document.createElement('a');
-                a.href = spreadsheetInfo.url;
-                a.target = '_blank';
-                a.rel = 'noopener noreferrer';
-                a.click();
-              } else {
-                setActiveTab('sheets');
-              }
+              const url = spreadsheetInfo?.url || DEFAULT_SPREADSHEET_URL;
+              window.open(url, '_blank', 'noopener,noreferrer');
             }}
           />
         )}
@@ -644,10 +674,12 @@ export default function App() {
         {activeTab === 'vehicles' && (
           <VehicleManager
             vehicles={vehicles}
+            peaBranches={peaBranches}
             onAddVehicle={handleAddVehicle}
             onUpdateVehicle={handleUpdateVehicle}
             onDeleteVehicle={handleDeleteVehicle}
             onStartInspection={handleStartInspectionForVehicle}
+            onNavigateToPeaBranches={() => setActiveTab('admin')}
           />
         )}
 
@@ -655,16 +687,12 @@ export default function App() {
           <InspectionHistory
             records={inspections}
             vehicles={vehicles}
+            peaBranches={peaBranches}
             filterVehicleId={historyFilterVehicleId}
             onDeleteRecord={handleDeleteInspection}
             onOpenSheets={() => {
-              if (spreadsheetInfo?.url) {
-                const a = document.createElement('a');
-                a.href = spreadsheetInfo.url;
-                a.target = '_blank';
-                a.rel = 'noopener noreferrer';
-                a.click();
-              }
+              const url = spreadsheetInfo?.url || DEFAULT_SPREADSHEET_URL;
+              window.open(url, '_blank', 'noopener,noreferrer');
             }}
             isSheetsConnected={isSheetsConnected}
           />
@@ -674,7 +702,9 @@ export default function App() {
           <AdminPanel
             user={user}
             vehicles={vehicles}
+            peaBranches={peaBranches}
             checklistTemplates={checklistTemplates}
+            spreadsheetInfo={spreadsheetInfo}
             onGoogleLogin={handleGoogleLogin}
             onAddVehicle={handleAddVehicle}
             onUpdateVehicle={handleUpdateVehicle}
@@ -682,21 +712,11 @@ export default function App() {
             onStartInspection={handleStartInspectionForVehicle}
             onUpdateTemplates={handleUpdateTemplates}
             onResetTemplates={handleResetTemplates}
-          />
-        )}
-
-        {activeTab === 'sheets' && (
-          <GoogleSheetsPanel
-            user={user}
-            spreadsheetInfo={spreadsheetInfo}
-            isConnecting={isConnecting}
-            onLogin={handleGoogleLogin}
-            onLogout={handleLogout}
-            onSyncAll={handleSyncAll}
-            onSyncVehicles={handleSyncVehicles}
-            onSyncInspections={handleSyncInspections}
-            totalVehicles={vehicles.length}
-            totalInspections={inspections.length}
+            onSyncAdminUsers={handleSyncAdminUsers}
+            onSyncAllSheets={handleSyncAllSheets}
+            onUpdateSpreadsheetInfo={(info) => setSpreadsheetInfo(info)}
+            onAddPeaBranch={handleAddPeaBranch}
+            onDeletePeaBranch={handleDeletePeaBranch}
           />
         )}
       </main>
