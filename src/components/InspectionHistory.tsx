@@ -28,6 +28,7 @@ interface InspectionHistoryProps {
   vehicles: Vehicle[];
   peaBranches?: string[];
   filterVehicleId?: string | null;
+  isAdmin?: boolean;
   onDeleteRecord: (recordId: string) => void;
   onOpenSheets?: () => void;
   isSheetsConnected: boolean;
@@ -59,6 +60,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
   vehicles,
   peaBranches,
   filterVehicleId: initialFilterVehicleId,
+  isAdmin = false,
   onDeleteRecord,
   onOpenSheets,
   isSheetsConnected,
@@ -327,13 +329,15 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
                       ดูใบตรวจ
                     </button>
 
-                    <button
-                      onClick={() => setDeletingRecordId(rec.id)}
-                      title="ลบรายการตรวจนี้"
-                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => setDeletingRecordId(rec.id)}
+                        title="ลบรายการตรวจนี้ (เฉพาะผู้ดูแลระบบ)"
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -519,7 +523,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
         cancelLabel="ยกเลิก"
         isDestructive={true}
         onConfirm={() => {
-          if (deletingRecordId) {
+          if (deletingRecordId && isAdmin) {
             onDeleteRecord(deletingRecordId);
             setDeletingRecordId(null);
           }

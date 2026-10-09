@@ -14,7 +14,8 @@ import {
   Gauge, 
   Building, 
   X,
-  Zap
+  Zap,
+  Lock
 } from 'lucide-react';
 import { Vehicle, VehicleType, VehicleStatus, FuelType, VehicleCategory } from '../types/vehicle';
 import { ConfirmModal } from './ConfirmModal';
@@ -22,11 +23,13 @@ import { ConfirmModal } from './ConfirmModal';
 interface VehicleManagerProps {
   vehicles: Vehicle[];
   peaBranches?: string[];
+  isAdmin?: boolean;
   onAddVehicle: (vehicle: Omit<Vehicle, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onUpdateVehicle: (vehicle: Vehicle) => void;
   onDeleteVehicle: (vehicleId: string) => void;
   onStartInspection: (vehicleId: string) => void;
   onNavigateToPeaBranches?: () => void;
+  onNavigateToAdmin?: () => void;
 }
 
 export const VEHICLE_CATEGORY_META: Record<VehicleCategory, { label: string; badgeLabel: string; bg: string; text: string; icon: React.ReactNode }> = {
@@ -112,11 +115,13 @@ export const COMMON_PEA_BRANCHES = [
 export const VehicleManager: React.FC<VehicleManagerProps> = ({
   vehicles,
   peaBranches,
+  isAdmin = false,
   onAddVehicle,
   onUpdateVehicle,
   onDeleteVehicle,
   onStartInspection,
   onNavigateToPeaBranches,
+  onNavigateToAdmin,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedBranch, setSelectedBranch] = useState<string>('all');
@@ -147,6 +152,7 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
   });
 
   const handleOpenAdd = () => {
+    if (!isAdmin) return;
     setEditingVehicle(null);
     setFormError('');
     setFormData({
@@ -167,6 +173,7 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
   };
 
   const handleOpenEdit = (v: Vehicle) => {
+    if (!isAdmin) return;
     setEditingVehicle(v);
     setFormError('');
     setFormData({
@@ -188,6 +195,10 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
 
   const handleSubmitForm = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAdmin) {
+      setFormError('ผู้ใช้งานทั่วไปไม่สามารถเพิ่มหรือแก้ไขยานพาหนะได้ (เฉพาะผู้ดูแลระบบ)');
+      return;
+    }
     if (!formData.licensePlate.trim()) {
       setFormError('กรุณากรอกหมายเลขทะเบียนรถ');
       return;
@@ -247,13 +258,22 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
             แยกข้อมูลตามการไฟฟ้าส่วนภูมิภาค ({availableBranches.length} สังกัด) • แบ่ง 3 กลุ่มประเภทรถ ({vehicles.length} คัน)
           </p>
         </div>
-        <button
-          onClick={handleOpenAdd}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-xl shadow-xs transition-all active:scale-98"
-        >
-          <Plus className="w-4 h-4" />
-          เพิ่มยานพาหนะใหม่
-        </button>
+        {isAdmin ? (
+          <button
+            onClick={handleOpenAdd}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-xl shadow-xs transition-all active:scale-98 shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            เพิ่มยานพาหนะใหม่
+          </button>
+        ) : (
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold">
+              <Lock className="w-3.5 h-3.5 text-slate-500" />
+              <span>โหมดผู้ใช้งานทั่วไป (เฉพาะ Admin ที่เพิ่ม/แก้ไข/ลบรถได้)</span>
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Quick PEA Branch Selection Tabs */}
@@ -478,24 +498,31 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
 
                 {/* Card Actions */}
                 <div className="px-5 py-3 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => handleOpenEdit(v)}
-                      title="แก้ไขข้อมูลรถ"
-                      className="p-2 rounded-lg text-slate-600 hover:text-blue-600 hover:bg-white border border-transparent hover:border-slate-200 transition-all text-xs flex items-center gap-1"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>แก้ไข</span>
-                    </button>
-                    <button
-                      onClick={() => setDeletingVehicleId(v.id)}
-                      title="ลบยานพาหนะ"
-                      className="p-2 rounded-lg text-slate-600 hover:text-red-600 hover:bg-white border border-transparent hover:border-slate-200 transition-all text-xs flex items-center gap-1"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>ลบ</span>
-                    </button>
-                  </div>
+                  {isAdmin ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleOpenEdit(v)}
+                        title="แก้ไขข้อมูลรถ (เฉพาะผู้ดูแลระบบ)"
+                        className="p-2 rounded-lg text-slate-600 hover:text-blue-600 hover:bg-white border border-transparent hover:border-slate-200 transition-all text-xs flex items-center gap-1"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>แก้ไข</span>
+                      </button>
+                      <button
+                        onClick={() => setDeletingVehicleId(v.id)}
+                        title="ลบยานพาหนะ (เฉพาะผู้ดูแลระบบ)"
+                        className="p-2 rounded-lg text-slate-600 hover:text-red-600 hover:bg-white border border-transparent hover:border-slate-200 transition-all text-xs flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>ลบ</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-slate-400 text-xs px-1">
+                      <Lock className="w-3 h-3 text-slate-400" />
+                      <span>ดูข้อมูลเท่านั้น</span>
+                    </div>
+                  )}
 
                   <button
                     onClick={() => onStartInspection(v.id)}
@@ -832,7 +859,7 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
         cancelLabel="ยกเลิก"
         isDestructive={true}
         onConfirm={() => {
-          if (deletingVehicleId) {
+          if (deletingVehicleId && isAdmin) {
             onDeleteVehicle(deletingVehicleId);
             setDeletingVehicleId(null);
           }

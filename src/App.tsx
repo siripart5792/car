@@ -17,14 +17,16 @@ import {
   Wrench,
   Menu,
   X,
-  ExternalLink
+  ExternalLink,
+  Lock
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { 
   Vehicle, 
   InspectionRecord, 
   VehicleStatus, 
-  ChecklistTemplatesState 
+  ChecklistTemplatesState,
+  AdminUser
 } from './types/vehicle';
 import { 
   loadVehicles, 
@@ -36,7 +38,10 @@ import {
   resetChecklistTemplatesToDefault,
   loadAdminUsers,
   loadPeaBranches,
-  savePeaBranches
+  savePeaBranches,
+  getCurrentAdminUser,
+  isStoredAdminAuth,
+  setStoredAdminAuth
 } from './services/storage';
 import { 
   initAuth, 
@@ -85,10 +90,19 @@ export default function App() {
 
   // Auth & Google Sheets state (initialized from persistent cache for instant link)
   const [user, setUser] = useState<User | null>(null);
+  const [currentAdminUser, setCurrentAdminUser] = useState<AdminUser | null>(() => getCurrentAdminUser());
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => {
+    return !!getCurrentAdminUser() || isStoredAdminAuth();
+  });
   const [accessToken, setAccessToken] = useState<string | null>(() => getStoredAccessToken());
   const [spreadsheetInfo, setSpreadsheetInfo] = useState<SpreadsheetInfo | null>(() => getSavedSpreadsheetInfo());
   const [isConnecting, setIsConnecting] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const handleAdminAuthChange = (isLoggedIn: boolean, adminUser: AdminUser | null) => {
+    setIsAdmin(isLoggedIn);
+    setCurrentAdminUser(adminUser);
+  };
 
   // Toast / notification feedback
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
@@ -236,11 +250,19 @@ export default function App() {
     setUser(null);
     setAccessToken(null);
     setSpreadsheetInfo(null);
+    setIsAdmin(false);
+    setCurrentAdminUser(null);
+    setStoredAdminAuth(false);
     showToast('ออกจากระบบเรียบร้อยแล้ว', 'info');
   };
 
   // 4. Vehicle Operations
   const handleAddVehicle = async (newVehicleData: Omit<Vehicle, 'id' | 'createdAt' | 'updatedAt'>) => {
+    if (!isAdmin) {
+      showToast('ผู้ใช้งานทั่วไปไม่สามารถเพิ่มยานพาหนะได้ (เฉพาะผู้ดูแลระบบ)', 'error');
+      return;
+    }
+
     const newVehicle: Vehicle = {
       ...newVehicleData,
       id: `veh-${Date.now()}`,
@@ -280,6 +302,11 @@ export default function App() {
   };
 
   const handleUpdateVehicle = async (updatedVehicle: Vehicle) => {
+    if (!isAdmin) {
+      showToast('ผู้ใช้งานทั่วไปไม่สามารถแก้ไขยานพาหนะได้ (เฉพาะผู้ดูแลระบบ)', 'error');
+      return;
+    }
+
     const updated = vehicles.map((v) => (v.id === updatedVehicle.id ? updatedVehicle : v));
     setVehicles(updated);
     saveVehicles(updated);
@@ -306,6 +333,11 @@ export default function App() {
   };
 
   const handleDeleteVehicle = async (vehicleId: string) => {
+    if (!isAdmin) {
+      showToast('ผู้ใช้งานทั่วไปไม่สามารถลบยานพาหนะได้ (เฉพาะผู้ดูแลระบบ)', 'error');
+      return;
+    }
+
     const vehicleToDelete = vehicles.find((v) => v.id === vehicleId);
     const updated = vehicles.filter((v) => v.id !== vehicleId);
     setVehicles(updated);
@@ -419,6 +451,11 @@ export default function App() {
   };
 
   const handleDeleteInspection = async (recordId: string) => {
+    if (!isAdmin) {
+      showToast('ผู้ใช้งานทั่วไปไม่สามารถลบผลตรวจเช็คสภาพยานพาหนะได้ (เฉพาะผู้ดูแลระบบ)', 'error');
+      return;
+    }
+
     const updated = inspections.filter((i) => i.id !== recordId);
     setInspections(updated);
     saveInspections(updated);
@@ -743,7 +780,19 @@ export default function App() {
 
           {/* Right Status / Auth */}
           <div className="flex items-center gap-2">
-            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800">
+            {isAdmin ? (
+              <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-900 shadow-2xs">
+                <span>👑 ผู้ดูแลระบบ</span>
+                {currentAdminUser && <span className="font-medium text-amber-700 truncate max-w-[120px]">({currentAdminUser.displayName})</span>}
+              </div>
+            ) : (
+              <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 border border-slate-200 text-[11px] font-semibold text-slate-600">
+                <Lock className="w-3 h-3 text-slate-400" />
+                <span>โหมดผู้ใช้งานทั่วไป</span>
+              </div>
+            )}
+
+            <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
               <span>บันทึก Google Sheets อัตโนมัติ</span>
@@ -872,11 +921,13 @@ export default function App() {
           <VehicleManager
             vehicles={vehicles}
             peaBranches={peaBranches}
+            isAdmin={isAdmin}
             onAddVehicle={handleAddVehicle}
             onUpdateVehicle={handleUpdateVehicle}
             onDeleteVehicle={handleDeleteVehicle}
             onStartInspection={handleStartInspectionForVehicle}
             onNavigateToPeaBranches={() => setActiveTab('admin')}
+            onNavigateToAdmin={() => setActiveTab('admin')}
           />
         )}
 
@@ -886,6 +937,7 @@ export default function App() {
             vehicles={vehicles}
             peaBranches={peaBranches}
             filterVehicleId={historyFilterVehicleId}
+            isAdmin={isAdmin}
             onDeleteRecord={handleDeleteInspection}
             onOpenSheets={() => {
               const url = spreadsheetInfo?.url || DEFAULT_SPREADSHEET_URL;
@@ -902,6 +954,7 @@ export default function App() {
             peaBranches={peaBranches}
             checklistTemplates={checklistTemplates}
             spreadsheetInfo={spreadsheetInfo}
+            onAdminAuthChange={handleAdminAuthChange}
             onGoogleLogin={async () => { await handleGoogleLogin(); }}
             onAddVehicle={handleAddVehicle}
             onUpdateVehicle={handleUpdateVehicle}

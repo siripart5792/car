@@ -87,6 +87,7 @@ interface AdminPanelProps {
   onAddPeaBranch?: (branchName: string) => Promise<{ success: boolean; message: string }>;
   onDeletePeaBranch?: (branchName: string) => Promise<{ success: boolean; message: string }>;
   onLoadDataFromSheets?: () => Promise<void>;
+  onAdminAuthChange?: (isLoggedIn: boolean, adminUser: AdminUser | null) => void;
 }
 
 type AdminSubTab = 'vehicles' | 'general_checklist' | 'crane_checklist' | 'bucket_checklist' | 'admin_users' | 'pea_branches' | 'sheets_config';
@@ -116,6 +117,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onAddPeaBranch,
   onDeletePeaBranch,
   onLoadDataFromSheets,
+  onAdminAuthChange,
 }) => {
   // Admin users list state
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => loadAdminUsers());
@@ -232,7 +234,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setIsAdminLoggedIn(true);
       setCurrentAdmin(matchedUser);
       setCurrentAdminUser(matchedUser);
+      setStoredAdminAuth(true);
       setLoginError('');
+      if (onAdminAuthChange) {
+        onAdminAuthChange(true, matchedUser);
+      }
     } else {
       setLoginError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (User หลัก: admin / รหัสผ่าน: Pea*123456)');
     }
@@ -244,6 +250,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       await onGoogleLogin();
       setIsAdminLoggedIn(true);
       setStoredAdminAuth(true);
+      const current = getCurrentAdminUser();
+      if (onAdminAuthChange) {
+        onAdminAuthChange(true, current);
+      }
     } catch (err: any) {
       console.error('Google Admin Login failed:', err);
     } finally {
@@ -256,6 +266,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setCurrentAdmin(null);
     setCurrentAdminUser(null);
     setStoredAdminAuth(false);
+    if (onAdminAuthChange) {
+      onAdminAuthChange(false, null);
+    }
   };
 
   // Sub-tabs inside Admin
@@ -904,6 +917,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         <VehicleManager
           vehicles={vehicles}
           peaBranches={activePeaBranches}
+          isAdmin={true}
           onAddVehicle={onAddVehicle}
           onUpdateVehicle={onUpdateVehicle}
           onDeleteVehicle={onDeleteVehicle}
@@ -1810,63 +1824,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   </pre>
                 </div>
               )}
-            </div>
-          </div>
-
-          {/* Configuration Form Card */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-            <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-              <Settings className="w-4 h-4 text-slate-600" />
-              กำหนดลิงก์ Google Sheets ของระบบ (หรือ Spreadsheet ID)
-            </h4>
-
-            {sheetSaveStatus && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span>{sheetSaveStatus}</span>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                URL ของ Google Spreadsheet (หรือ Spreadsheet ID)
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={sheetUrlInput}
-                  onChange={(e) => setSheetUrlInput(e.target.value)}
-                  placeholder="https://docs.google.com/spreadsheets/d/..."
-                  className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    let cleanId = sheetUrlInput.trim();
-                    const match = cleanId.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-                    if (match && match[1]) {
-                      cleanId = match[1];
-                    }
-                    const newInfo: SpreadsheetInfo = {
-                      id: cleanId,
-                      url: sheetUrlInput.startsWith('http') ? sheetUrlInput : `https://docs.google.com/spreadsheets/d/${cleanId}/edit`,
-                      title: 'ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน - กฟภ. (PEA)',
-                    };
-                    saveSpreadsheetInfo(newInfo);
-                    if (onUpdateSpreadsheetInfo) {
-                      onUpdateSpreadsheetInfo(newInfo);
-                    }
-                    setSheetSaveStatus('บันทึกการตั้งค่าลิงก์ Google Sheets เรียบร้อยแล้ว');
-                    setTimeout(() => setSheetSaveStatus(''), 4000);
-                  }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shrink-0"
-                >
-                  บันทึกลิงก์
-                </button>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1">
-                สามารถเปลี่ยนลิงก์สเปรดชีตไปยังไฟล์อื่นของการไฟฟ้าได้ ระบบจะบันทึกข้อมูลเข้าชีตที่ระบุไว้โดยอัตโนมัติ
-              </p>
             </div>
           </div>
         </div>
