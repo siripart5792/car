@@ -54,7 +54,9 @@ import {
   saveSpreadsheetInfo,
   getSavedWebhookUrl,
   saveWebhookUrl,
-  testAppsScriptConnection
+  testAppsScriptConnection,
+  DEFAULT_WEBHOOK_URL,
+  resetWebhookUrlToDefault
 } from '../services/googleSheets';
 import { GOOGLE_APPS_SCRIPT_CODE } from '../data/googleAppsScriptCode';
 import { 
@@ -1635,9 +1637,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
             {/* Web App URL Form */}
             <div className="space-y-3 bg-white/5 p-4 sm:p-5 rounded-xl border border-white/10">
-              <label className="block text-xs font-semibold text-emerald-200">
-                URL ของ Google Apps Script (Web App URL ที่ลงท้ายด้วย /exec)
-              </label>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="block text-xs font-semibold text-emerald-200">
+                  URL ของ Google Apps Script (Web App URL ที่ลงท้ายด้วย /exec)
+                </label>
+                {webhookUrlInput.trim() === DEFAULT_WEBHOOK_URL && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                    ค่าเริ่มต้นของระบบ (เปิดใช้งานอัตโนมัติแล้ว)
+                  </span>
+                )}
+              </div>
               <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   type="text"
@@ -1646,7 +1656,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   placeholder="https://script.google.com/macros/s/.../exec"
                   className="flex-1 px-3.5 py-2.5 bg-slate-950/70 border border-emerald-500/30 rounded-xl text-xs sm:text-sm font-mono text-emerald-300 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 focus:border-emerald-400"
                 />
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap">
                   <button
                     type="button"
                     onClick={handleSaveWebhook}
@@ -1654,6 +1664,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   >
                     บันทึก URL
                   </button>
+                  {webhookUrlInput.trim() !== DEFAULT_WEBHOOK_URL && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const defaultUrl = resetWebhookUrlToDefault();
+                        setWebhookUrlInput(defaultUrl);
+                        setSheetSaveStatus('คืนค่า URL ของ Google Apps Script เป็นค่าเริ่มต้นของระบบเรียบร้อยแล้ว');
+                        setTimeout(() => setSheetSaveStatus(''), 4000);
+                      }}
+                      className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs sm:text-sm font-medium transition-all border border-slate-700 active:scale-98"
+                      title="คืนค่าเป็น URL ค่าเริ่มต้นของระบบ"
+                    >
+                      คืนค่าเริ่มต้น
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleTestWebhook}

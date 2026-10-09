@@ -56,7 +56,9 @@ import {
   getSavedSpreadsheetInfo,
   saveSpreadsheetInfo,
   DEFAULT_SPREADSHEET_URL,
+  DEFAULT_WEBHOOK_URL,
   getSavedWebhookUrl,
+  saveWebhookUrl,
   callAppsScriptApi,
   fetchDataFromAppsScript,
   syncAllViaAppsScript
@@ -102,6 +104,12 @@ export default function App() {
 
   // 1. Initialize Firebase Auth State Listener & Auto-link Google Sheets
   useEffect(() => {
+    // Ensure default Google Apps Script Web App URL is saved if not present
+    const existingWebhook = localStorage.getItem('vehicle_inspection_webhook_url');
+    if (!existingWebhook || !existingWebhook.trim()) {
+      saveWebhookUrl(DEFAULT_WEBHOOK_URL);
+    }
+
     // Auto-fetch shared database from Google Apps Script if Web App URL is configured
     const savedWebhook = getSavedWebhookUrl();
     if (savedWebhook) {

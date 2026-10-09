@@ -49,6 +49,8 @@ export const ADMIN_ROLE_LABELS: Record<string, string> = {
 export const DEFAULT_SPREADSHEET_ID = '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms';
 export const DEFAULT_SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}/edit`;
 
+export const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbxM-so9M9me64MEVH8KLf4FBqkpqypLHU0Dtdi2yP4FZNvbDuQIKO_dzKjqkRQPx5Bc/exec';
+
 export const DEFAULT_SPREADSHEET_INFO: SpreadsheetInfo = {
   id: DEFAULT_SPREADSHEET_ID,
   url: DEFAULT_SPREADSHEET_URL,
@@ -85,11 +87,20 @@ export const saveSpreadsheetInfo = (info: SpreadsheetInfo): void => {
 };
 
 export const getSavedWebhookUrl = (): string => {
-  return localStorage.getItem(WEBHOOK_URL_STORAGE_KEY) || '';
+  const saved = localStorage.getItem(WEBHOOK_URL_STORAGE_KEY);
+  if (saved && saved.trim()) {
+    return saved.trim();
+  }
+  return DEFAULT_WEBHOOK_URL;
 };
 
 export const saveWebhookUrl = (url: string): void => {
   localStorage.setItem(WEBHOOK_URL_STORAGE_KEY, url.trim());
+};
+
+export const resetWebhookUrlToDefault = (): string => {
+  localStorage.setItem(WEBHOOK_URL_STORAGE_KEY, DEFAULT_WEBHOOK_URL);
+  return DEFAULT_WEBHOOK_URL;
 };
 
 export const clearSpreadsheetId = (): void => {
