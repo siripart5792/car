@@ -54,7 +54,12 @@ import {
   syncBranchSummaryToSheet,
   SpreadsheetInfo,
   getSavedSpreadsheetInfo,
-  DEFAULT_SPREADSHEET_URL
+  saveSpreadsheetInfo,
+  DEFAULT_SPREADSHEET_URL,
+  getSavedWebhookUrl,
+  callAppsScriptApi,
+  fetchDataFromAppsScript,
+  syncAllViaAppsScript
 } from './services/googleSheets';
 
 import { Dashboard } from './components/Dashboard';
@@ -93,10 +98,44 @@ export default function App() {
     }, 4000);
   };
 
-  const isSheetsConnected = !!(accessToken || getStoredAccessToken()) && !!(spreadsheetInfo || getSavedSpreadsheetInfo());
+  const isSheetsConnected = !!getSavedWebhookUrl() || (!!(accessToken || getStoredAccessToken()) && !!(spreadsheetInfo || getSavedSpreadsheetInfo()));
 
   // 1. Initialize Firebase Auth State Listener & Auto-link Google Sheets
   useEffect(() => {
+    // Auto-fetch shared database from Google Apps Script if Web App URL is configured
+    const savedWebhook = getSavedWebhookUrl();
+    if (savedWebhook) {
+      fetchDataFromAppsScript(savedWebhook)
+        .then((res) => {
+          if (res.success) {
+            if (res.vehicles && res.vehicles.length > 0) {
+              setVehicles(res.vehicles);
+              saveVehicles(res.vehicles);
+            }
+            if (res.inspections && res.inspections.length > 0) {
+              setInspections(res.inspections);
+              saveInspections(res.inspections);
+            }
+            if (res.branches && res.branches.length > 0) {
+              setPeaBranches(res.branches);
+              savePeaBranches(res.branches);
+            }
+            if (res.sheetTitle && res.sheetId) {
+              const info: SpreadsheetInfo = {
+                id: res.sheetId,
+                url: res.sheetUrl || `https://docs.google.com/spreadsheets/d/${res.sheetId}/edit`,
+                title: res.sheetTitle,
+              };
+              setSpreadsheetInfo(info);
+              saveSpreadsheetInfo(info);
+            }
+          }
+        })
+        .catch((err) => {
+          console.warn('Could not auto-fetch from Apps Script on mount:', err);
+        });
+    }
+
     // Check cached token and auto-fetch/verify spreadsheet immediately on launch
     const cachedToken = getStoredAccessToken();
     if (cachedToken) {
@@ -213,6 +252,13 @@ export default function App() {
     showToast(`เพิ่มยานพาหนะทะเบียน ${newVehicle.licensePlate} (${catLabel}) เรียบร้อยแล้ว`, 'success');
 
     // Auto sync to sheet immediately
+    const webhookUrl = getSavedWebhookUrl();
+    if (webhookUrl) {
+      callAppsScriptApi(webhookUrl, { action: 'saveVehicle', vehicle: newVehicle }).catch((e) => {
+        console.warn('Apps Script sync vehicle failed:', e);
+      });
+    }
+
     const currentToken = accessToken || getStoredAccessToken();
     const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
     if (currentToken && currentSheet) {
@@ -232,6 +278,13 @@ export default function App() {
     showToast(`แก้ไขข้อมูลทะเบียน ${updatedVehicle.licensePlate} เรียบร้อยแล้ว`, 'success');
 
     // Auto sync to sheet immediately
+    const webhookUrl = getSavedWebhookUrl();
+    if (webhookUrl) {
+      callAppsScriptApi(webhookUrl, { action: 'saveVehicle', vehicle: updatedVehicle }).catch((e) => {
+        console.warn('Apps Script update vehicle failed:', e);
+      });
+    }
+
     const currentToken = accessToken || getStoredAccessToken();
     const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
     if (currentToken && currentSheet) {
@@ -252,6 +305,13 @@ export default function App() {
     showToast(`ลบยานพาหนะทะเบียน ${vehicleToDelete?.licensePlate || ''} เรียบร้อยแล้ว`, 'info');
 
     // Auto sync to sheet immediately
+    const webhookUrl = getSavedWebhookUrl();
+    if (webhookUrl) {
+      callAppsScriptApi(webhookUrl, { action: 'deleteVehicle', vehicleId }).catch((e) => {
+        console.warn('Apps Script delete vehicle failed:', e);
+      });
+    }
+
     const currentToken = accessToken || getStoredAccessToken();
     const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
     if (currentToken && currentSheet) {
@@ -311,7 +371,21 @@ export default function App() {
     const updatedInspections = [newRecord, ...inspections];
 
     // Auto write row directly into Google Sheets if connected
-    if (currentToken && currentSheet) {
+    const webhookUrl = getSavedWebhookUrl();
+
+    if (webhookUrl) {
+      callAppsScriptApi(webhookUrl, {
+        action: 'appendInspection',
+        record: newRecord,
+      })
+        .then(() => {
+          newRecord.syncedToSheets = true;
+        })
+        .catch((err) => {
+          console.warn('Apps Script append inspection warning:', err);
+        });
+      showToast(`บันทึกผลการตรวจทะเบียน ${newRecord.vehicleLicensePlate} และบันทึกลง Google Sheets ทันทีเรียบร้อยแล้ว`, 'success');
+    } else if (currentToken && currentSheet) {
       try {
         await appendInspectionToSheet(currentToken, currentSheet.id, newRecord);
         await syncVehiclesToSheet(currentToken, currentSheet.id, updatedVehicles);
@@ -342,6 +416,11 @@ export default function App() {
     saveInspections(updated);
     showToast('ลบบันทึกการตรวจเรียบร้อยแล้ว', 'info');
 
+    const webhookUrl = getSavedWebhookUrl();
+    if (webhookUrl) {
+      callAppsScriptApi(webhookUrl, { action: 'syncAll', inspections: updated, vehicles }).catch(console.warn);
+    }
+
     const currentToken = accessToken || getStoredAccessToken();
     const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
     if (currentToken && currentSheet) {
@@ -356,6 +435,11 @@ export default function App() {
 
   // 7. Auto Sync for Admin Users and All 4 Sheets
   const handleSyncAdminUsers = async (users: any[]) => {
+    const webhookUrl = getSavedWebhookUrl();
+    if (webhookUrl) {
+      callAppsScriptApi(webhookUrl, { action: 'syncAll', adminUsers: users }).catch(console.warn);
+    }
+
     const currentToken = accessToken || getStoredAccessToken();
     const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
     if (currentToken && currentSheet) {
@@ -382,7 +466,12 @@ export default function App() {
     savePeaBranches(updated);
     showToast(`เพิ่มรายชื่อการไฟฟ้า "${trimmed}" เรียบร้อยแล้ว`, 'success');
 
-    // Auto sync to sheet 'สรุปแยกตามการไฟฟ้า'
+    // Auto sync to sheet 'สรุปแยกตามการไฟฟ้า' and Apps Script
+    const webhookUrl = getSavedWebhookUrl();
+    if (webhookUrl) {
+      callAppsScriptApi(webhookUrl, { action: 'saveBranches', branches: updated }).catch(console.warn);
+    }
+
     const currentToken = accessToken || getStoredAccessToken();
     const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
     if (currentToken && currentSheet) {
@@ -405,7 +494,12 @@ export default function App() {
     savePeaBranches(updated);
     showToast(`ลบรายชื่อการไฟฟ้า "${trimmed}" เรียบร้อยแล้ว`, 'info');
 
-    // Auto sync to sheet 'สรุปแยกตามการไฟฟ้า'
+    // Auto sync to sheet 'สรุปแยกตามการไฟฟ้า' and Apps Script
+    const webhookUrl = getSavedWebhookUrl();
+    if (webhookUrl) {
+      callAppsScriptApi(webhookUrl, { action: 'saveBranches', branches: updated }).catch(console.warn);
+    }
+
     const currentToken = accessToken || getStoredAccessToken();
     const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
     if (currentToken && currentSheet) {
@@ -419,15 +513,36 @@ export default function App() {
   };
 
   const handleSyncAllSheets = async () => {
+    const webhookUrl = getSavedWebhookUrl();
     let currentToken = accessToken || getStoredAccessToken();
     const currentSheet = spreadsheetInfo || getSavedSpreadsheetInfo();
 
+    // Priority 1: Apps Script Web App (No OAuth required, works seamlessly for all users)
+    if (webhookUrl) {
+      try {
+        const currentAdmins = loadAdminUsers();
+        await syncAllViaAppsScript(webhookUrl, {
+          vehicles,
+          inspections,
+          branches: peaBranches,
+          adminUsers: currentAdmins,
+        });
+        showToast('ซิงค์ข้อมูลทั้ง 5 แผ่นงานลง Google Sheets ผ่าน Apps Script สำเร็จเรียบร้อยแล้ว', 'success');
+        return;
+      } catch (err: any) {
+        console.warn('Apps Script bulk sync warning:', err);
+        showToast(`ซิงค์ผ่าน Apps Script ไม่สำเร็จ: ${err?.message || 'โปรดตรวจสอบ URL'}`, 'error');
+        return;
+      }
+    }
+
+    // Priority 2: Direct OAuth Sheets API
     if (!currentToken) {
-      showToast('กรุณากดยืนยันสิทธิ์ Google เพื่อเชื่อมโยงสเปรดชีต (กำลังเปิดหน้าต่างยืนยันสิทธิ์...)', 'info');
+      showToast('กรุณากดยืนยันสิทธิ์ Google หรือระบุ URL ของ Apps Script ในการตั้งค่า', 'info');
       const loginRes = await handleGoogleLogin();
       currentToken = loginRes?.accessToken || getStoredAccessToken();
       if (!currentToken) {
-        showToast('ยังไม่มีสิทธิ์ Google (หากป๊อปอัปถูกบล็อก กรุณาอนุญาตป๊อปอัปในเบราว์เซอร์ หรือกรอก Access Token)', 'info');
+        showToast('ยังไม่มี Token หรือยังไม่ได้ยืนยันสิทธิ์ Google (แนะนำให้ใส่ URL ของ Google Apps Script ที่แถบผู้ดูแลระบบ)', 'info');
         return;
       }
     }
@@ -447,6 +562,51 @@ export default function App() {
     } catch (err: any) {
       console.warn('Sync all sheets warning:', err);
       showToast(`ซิงค์ข้อมูลไม่สำเร็จ: ${err?.message || 'โปรดตรวจสอบการเชื่อมต่อ'}`, 'error');
+    }
+  };
+
+  // Pull latest fleet and inspection history from Google Sheets via Apps Script
+  const handlePullFromSheets = async () => {
+    const webhookUrl = getSavedWebhookUrl();
+    if (!webhookUrl) {
+      showToast('กรุณาระบุ URL ของ Google Apps Script ในหน้าตั้งค่าก่อน', 'error');
+      return;
+    }
+    try {
+      showToast('กำลังดึงข้อมูลล่าสุดจาก Google Sheets...', 'info');
+      const res = await fetchDataFromAppsScript(webhookUrl);
+      if (res.success) {
+        let countVehicles = 0;
+        let countInspections = 0;
+        if (res.vehicles && res.vehicles.length > 0) {
+          setVehicles(res.vehicles);
+          saveVehicles(res.vehicles);
+          countVehicles = res.vehicles.length;
+        }
+        if (res.inspections && res.inspections.length > 0) {
+          setInspections(res.inspections);
+          saveInspections(res.inspections);
+          countInspections = res.inspections.length;
+        }
+        if (res.branches && res.branches.length > 0) {
+          setPeaBranches(res.branches);
+          savePeaBranches(res.branches);
+        }
+        if (res.sheetTitle && res.sheetId) {
+          const info: SpreadsheetInfo = {
+            id: res.sheetId,
+            url: res.sheetUrl || `https://docs.google.com/spreadsheets/d/${res.sheetId}/edit`,
+            title: res.sheetTitle,
+          };
+          setSpreadsheetInfo(info);
+          saveSpreadsheetInfo(info);
+        }
+        showToast(`ดึงข้อมูลสำเร็จ: รถ ${countVehicles} คัน, ประวัติ ${countInspections} รายการ`, 'success');
+      } else {
+        showToast(res.message || 'ไม่สามารถดึงข้อมูลจาก Google Sheets ได้', 'error');
+      }
+    } catch (err: any) {
+      showToast(`ดึงข้อมูลไม่สำเร็จ: ${err?.message || 'เกิดข้อผิดพลาด'}`, 'error');
     }
   };
 
@@ -694,7 +854,7 @@ export default function App() {
             preselectedVehicleId={preselectedVehicleId}
             isSheetsConnected={isSheetsConnected}
             spreadsheetInfo={spreadsheetInfo}
-            onConnectSheets={handleGoogleLogin}
+            onConnectSheets={async () => { await handleGoogleLogin(); }}
             onSaveInspection={handleSaveInspection}
             onViewHistory={handleViewHistoryForVehicle}
           />
@@ -734,7 +894,7 @@ export default function App() {
             peaBranches={peaBranches}
             checklistTemplates={checklistTemplates}
             spreadsheetInfo={spreadsheetInfo}
-            onGoogleLogin={handleGoogleLogin}
+            onGoogleLogin={async () => { await handleGoogleLogin(); }}
             onAddVehicle={handleAddVehicle}
             onUpdateVehicle={handleUpdateVehicle}
             onDeleteVehicle={handleDeleteVehicle}
@@ -746,6 +906,7 @@ export default function App() {
             onUpdateSpreadsheetInfo={(info) => setSpreadsheetInfo(info)}
             onAddPeaBranch={handleAddPeaBranch}
             onDeletePeaBranch={handleDeletePeaBranch}
+            onLoadDataFromSheets={handlePullFromSheets}
           />
         )}
       </main>

@@ -98,6 +98,178 @@ export const clearSpreadsheetId = (): void => {
 };
 
 /**
+ * Call Google Apps Script Web App API
+ * Uses Content-Type text/plain to prevent browser CORS preflight (OPTIONS)
+ */
+export async function callAppsScriptApi(
+  url: string,
+  payload: Record<string, any>
+): Promise<any> {
+  const cleanUrl = url.trim();
+  if (!cleanUrl) {
+    throw new Error('ยังไม่ได้ระบุ URL ของ Google Apps Script');
+  }
+
+  const res = await fetch(cleanUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8',
+    },
+    body: JSON.stringify(payload),
+    redirect: 'follow',
+  });
+
+  if (!res.ok) {
+    throw new Error(`Google Apps Script ตอบกลับด้วยข้อผิดพลาด (Status: ${res.status})`);
+  }
+
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    return { success: true, raw: text };
+  }
+}
+
+/**
+ * Test Google Apps Script Web App Connection
+ */
+export async function testAppsScriptConnection(url: string): Promise<{
+  success: boolean;
+  message: string;
+  sheetTitle?: string;
+  sheetId?: string;
+}> {
+  const cleanUrl = url.trim();
+  if (!cleanUrl) {
+    return { success: false, message: 'กรุณาระบุ URL ของ Google Apps Script (Web App)' };
+  }
+
+  try {
+    const getUrl = cleanUrl.includes('?') ? `${cleanUrl}&action=ping` : `${cleanUrl}?action=ping`;
+    const getRes = await fetch(getUrl, { method: 'GET', redirect: 'follow' });
+    if (getRes.ok) {
+      const data = await getRes.json();
+      if (data && data.success) {
+        return {
+          success: true,
+          message: data.message || 'เชื่อมต่อกับ Google Apps Script สำเร็จ',
+          sheetTitle: data.sheetTitle,
+          sheetId: data.sheetId,
+        };
+      }
+    }
+  } catch (getErr) {
+    // Try POST if GET fails
+  }
+
+  try {
+    const postRes = await callAppsScriptApi(cleanUrl, { action: 'ping' });
+    if (postRes && postRes.success) {
+      return {
+        success: true,
+        message: postRes.message || 'เชื่อมต่อกับ Google Apps Script สำเร็จ',
+        sheetTitle: postRes.sheetTitle,
+        sheetId: postRes.sheetId,
+      };
+    }
+    return {
+      success: false,
+      message: postRes?.message || 'เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบการ Deploy เว็บแอป (สิทธิ์: ทุกคน / Anyone)',
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err?.message || 'ไม่สามารถติดต่อ Google Apps Script ได้ (โปรดตรวจสอบ URL และการอนุญาตสิทธิ์)',
+    };
+  }
+}
+
+/**
+ * Fetch all data from Google Apps Script to synchronize local state
+ */
+export async function fetchDataFromAppsScript(url: string): Promise<{
+  success: boolean;
+  vehicles?: Vehicle[];
+  inspections?: InspectionRecord[];
+  branches?: string[];
+  sheetTitle?: string;
+  sheetId?: string;
+  sheetUrl?: string;
+  message?: string;
+}> {
+  const cleanUrl = url.trim();
+  if (!cleanUrl) {
+    return { success: false, message: 'ไม่มี URL ของ Google Apps Script' };
+  }
+
+  try {
+    const getUrl = cleanUrl.includes('?') ? `${cleanUrl}&action=getAllData` : `${cleanUrl}?action=getAllData`;
+    const res = await fetch(getUrl, { method: 'GET', redirect: 'follow' });
+    if (res.ok) {
+      const json = await res.json();
+      if (json && json.success && json.data) {
+        return {
+          success: true,
+          vehicles: json.data.vehicles || [],
+          inspections: json.data.inspections || [],
+          branches: json.data.branches || [],
+          sheetTitle: json.data.spreadsheetTitle,
+          sheetId: json.data.spreadsheetId,
+          sheetUrl: json.data.spreadsheetUrl,
+        };
+      }
+    }
+  } catch (e) {
+    // try POST
+  }
+
+  try {
+    const json = await callAppsScriptApi(cleanUrl, { action: 'getAllData' });
+    if (json && json.success && json.data) {
+      return {
+        success: true,
+        vehicles: json.data.vehicles || [],
+        inspections: json.data.inspections || [],
+        branches: json.data.branches || [],
+        sheetTitle: json.data.spreadsheetTitle,
+        sheetId: json.data.spreadsheetId,
+        sheetUrl: json.data.spreadsheetUrl,
+      };
+    }
+    return { success: false, message: json?.message || 'ไม่สามารถดึงข้อมูลจาก Google Sheets ได้' };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets' };
+  }
+}
+
+/**
+ * Sync all data to Google Sheets via Apps Script Web App
+ */
+export async function syncAllViaAppsScript(
+  url: string,
+  payload: {
+    vehicles: Vehicle[];
+    inspections: InspectionRecord[];
+    branches: string[];
+    adminUsers?: any[];
+  }
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await callAppsScriptApi(url, {
+      action: 'syncAll',
+      ...payload,
+    });
+    if (res && res.success) {
+      return { success: true, message: res.message || 'ซิงค์ข้อมูลลง Google Sheets ผ่าน Apps Script สำเร็จ' };
+    }
+    throw new Error(res?.message || 'ซิงค์ข้อมูลไม่สำเร็จ');
+  } catch (err: any) {
+    throw new Error(err?.message || 'ไม่สามารถส่งข้อมูลไปยัง Apps Script ได้');
+  }
+}
+
+/**
  * Creates or retrieves the Google Spreadsheet
  */
 export async function getOrCreateSpreadsheet(accessToken: string): Promise<SpreadsheetInfo> {

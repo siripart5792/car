@@ -30,7 +30,13 @@ import {
   Building,
   Building2,
   Trash,
-  Search
+  Search,
+  Copy,
+  Check,
+  Code,
+  Sparkles,
+  Terminal,
+  ArrowRight
 } from 'lucide-react';
 import { User as FirebaseUser } from 'firebase/auth';
 import { 
@@ -43,7 +49,14 @@ import {
 } from '../types/vehicle';
 import { VehicleManager, COMMON_PEA_BRANCHES } from './VehicleManager';
 import { ConfirmModal } from './ConfirmModal';
-import { SpreadsheetInfo, saveSpreadsheetInfo } from '../services/googleSheets';
+import { 
+  SpreadsheetInfo, 
+  saveSpreadsheetInfo,
+  getSavedWebhookUrl,
+  saveWebhookUrl,
+  testAppsScriptConnection
+} from '../services/googleSheets';
+import { GOOGLE_APPS_SCRIPT_CODE } from '../data/googleAppsScriptCode';
 import { 
   loadAdminUsers, 
   saveAdminUsers, 
@@ -71,6 +84,7 @@ interface AdminPanelProps {
   onUpdateSpreadsheetInfo?: (info: SpreadsheetInfo) => void;
   onAddPeaBranch?: (branchName: string) => Promise<{ success: boolean; message: string }>;
   onDeletePeaBranch?: (branchName: string) => Promise<{ success: boolean; message: string }>;
+  onLoadDataFromSheets?: () => Promise<void>;
 }
 
 type AdminSubTab = 'vehicles' | 'general_checklist' | 'crane_checklist' | 'bucket_checklist' | 'admin_users' | 'pea_branches' | 'sheets_config';
@@ -99,6 +113,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onUpdateSpreadsheetInfo,
   onAddPeaBranch,
   onDeletePeaBranch,
+  onLoadDataFromSheets,
 }) => {
   // Admin users list state
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => loadAdminUsers());
@@ -115,6 +130,62 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [sheetUrlInput, setSheetUrlInput] = useState<string>(spreadsheetInfo?.url || '');
   const [sheetSaveStatus, setSheetSaveStatus] = useState<string>('');
   const [isSyncingAllSheets, setIsSyncingAllSheets] = useState(false);
+
+  // Google Apps Script Web App states
+  const [webhookUrlInput, setWebhookUrlInput] = useState<string>(() => getSavedWebhookUrl());
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [webhookTestResult, setWebhookTestResult] = useState<{ success: boolean; message: string; sheetTitle?: string; sheetId?: string } | null>(null);
+  const [isCopyingScript, setIsCopyingScript] = useState(false);
+  const [showScriptPreview, setShowScriptPreview] = useState(false);
+  const [isPullingData, setIsPullingData] = useState(false);
+
+  const handleCopyScript = async () => {
+    try {
+      await navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_CODE);
+      setIsCopyingScript(true);
+      setTimeout(() => setIsCopyingScript(false), 3000);
+    } catch (err) {
+      // fallback
+    }
+  };
+
+  const handleTestWebhook = async () => {
+    const clean = webhookUrlInput.trim();
+    if (!clean) {
+      alert('กรุณาระบุ URL ของ Google Apps Script ก่อนกดทดสอบ');
+      return;
+    }
+    setIsTestingWebhook(true);
+    setWebhookTestResult(null);
+    try {
+      const res = await testAppsScriptConnection(clean);
+      setWebhookTestResult(res);
+    } catch (err: any) {
+      setWebhookTestResult({
+        success: false,
+        message: err?.message || 'ไม่สามารถติดต่อ Google Apps Script ได้',
+      });
+    } finally {
+      setIsTestingWebhook(false);
+    }
+  };
+
+  const handleSaveWebhook = () => {
+    const clean = webhookUrlInput.trim();
+    saveWebhookUrl(clean);
+    setSheetSaveStatus('บันทึก URL ของ Google Apps Script เรียบร้อยแล้ว (ระบบพร้อมใช้งานโดยไม่ต้องล็อกอิน Google)');
+    setTimeout(() => setSheetSaveStatus(''), 4500);
+  };
+
+  const handlePullData = async () => {
+    if (!onLoadDataFromSheets) return;
+    setIsPullingData(true);
+    try {
+      await onLoadDataFromSheets();
+    } finally {
+      setIsPullingData(false);
+    }
+  };
 
   useEffect(() => {
     if (spreadsheetInfo?.url) {
@@ -1528,11 +1599,200 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
+          {/* Google Apps Script (Web App) Section - Recommended for Shared Multi-User Database */}
+          <div className="bg-gradient-to-br from-emerald-900 to-slate-900 text-white p-6 rounded-2xl shadow-md border border-emerald-700/40 space-y-6">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-emerald-700/50 pb-5">
+              <div className="flex items-start gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 flex items-center justify-center shrink-0">
+                  <Sparkles className="w-6 h-6 text-emerald-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-bold text-white text-base sm:text-lg">
+                      เชื่อมต่อ Google Sheets ผ่าน Google Apps Script (ฐานข้อมูลกลาง)
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/30 text-emerald-300 border border-emerald-400/40">
+                      แนะนำเป็นหลัก (ทุกคนใช้ได้)
+                    </span>
+                  </div>
+                  <p className="text-xs sm:text-sm text-emerald-100/80 mt-1 max-w-2xl leading-relaxed">
+                    วิธีนี้ช่วยให้ผู้ใช้งานทั่วไปทุกคน (พนักงานขับรถ, ช่างตรวจ, ผู้ดูแลระบบ) บันทึกและดึงข้อมูลรถจาก Google Sheets ชุดเดียวกันได้ทันทีจากทุกเครื่อง โดย<strong>ไม่ต้องล็อกอิน Google</strong> และ<strong>ไม่เจอปัญหาป๊อปอัปถูกบล็อก</strong>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleCopyScript}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs sm:text-sm shadow-sm transition-all active:scale-98"
+                >
+                  {isCopyingScript ? <Check className="w-4 h-4 text-slate-950" /> : <Copy className="w-4 h-4 text-slate-950" />}
+                  <span>{isCopyingScript ? 'คัดลอกโค้ดแล้ว!' : 'คัดลอกโค้ด Apps Script (Code.gs)'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Web App URL Form */}
+            <div className="space-y-3 bg-white/5 p-4 sm:p-5 rounded-xl border border-white/10">
+              <label className="block text-xs font-semibold text-emerald-200">
+                URL ของ Google Apps Script (Web App URL ที่ลงท้ายด้วย /exec)
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="text"
+                  value={webhookUrlInput}
+                  onChange={(e) => setWebhookUrlInput(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  className="flex-1 px-3.5 py-2.5 bg-slate-950/70 border border-emerald-500/30 rounded-xl text-xs sm:text-sm font-mono text-emerald-300 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 focus:border-emerald-400"
+                />
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleSaveWebhook}
+                    className="flex-1 sm:flex-none px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-sm active:scale-98"
+                  >
+                    บันทึก URL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleTestWebhook}
+                    disabled={isTestingWebhook}
+                    className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition-all border border-slate-600 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingWebhook ? 'animate-spin' : ''}`} />
+                    <span>{isTestingWebhook ? 'กำลังทดสอบ...' : 'ทดสอบการเชื่อมต่อ'}</span>
+                  </button>
+                  {onLoadDataFromSheets && (
+                    <button
+                      type="button"
+                      onClick={handlePullData}
+                      disabled={isPullingData}
+                      className="flex-1 sm:flex-none px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs sm:text-sm font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-1.5"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isPullingData ? 'animate-spin' : ''}`} />
+                      <span>{isPullingData ? 'กำลังดึง...' : 'ดึงข้อมูลจาก Sheets'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Webhook Test Feedback Banner */}
+              {webhookTestResult && (
+                <div
+                  className={`p-3.5 rounded-xl border text-xs sm:text-sm flex items-center gap-2.5 ${
+                    webhookTestResult.success
+                      ? 'bg-emerald-950/80 border-emerald-400/50 text-emerald-200'
+                      : 'bg-rose-950/80 border-rose-400/50 text-rose-200'
+                  }`}
+                >
+                  {webhookTestResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  )}
+                  <div className="flex-1">
+                    <p className="font-semibold">{webhookTestResult.message}</p>
+                    {webhookTestResult.sheetTitle && (
+                      <p className="text-xs text-emerald-300/80 mt-0.5">
+                        สเปรดชีต: {webhookTestResult.sheetTitle} (ID: {webhookTestResult.sheetId || '-'})
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Step-by-Step Instructions */}
+            <div className="space-y-4 pt-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-bold text-emerald-200 flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-emerald-400" />
+                  ขั้นตอนและวิธีการนำโค้ดไปติดตั้งใน Google Sheets (ทำเพียงครั้งเดียว)
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setShowScriptPreview(!showScriptPreview)}
+                  className="text-xs text-emerald-300 hover:text-emerald-100 underline font-medium"
+                >
+                  {showScriptPreview ? 'ซ่อนตัวอย่างโค้ด' : 'ดูตัวอย่างโค้ด Apps Script'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs text-emerald-100/90">
+                <div className="bg-slate-950/40 p-3.5 rounded-xl border border-white/5 space-y-1">
+                  <span className="inline-block px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold text-[11px]">
+                    ขั้นตอนที่ 1
+                  </span>
+                  <p className="font-semibold text-white">เปิด Google Sheets</p>
+                  <p className="text-[11px] text-slate-300">
+                    เปิดสเปรดชีตของคุณ แล้วคลิกเมนู <strong>ส่วนขยาย (Extensions)</strong> &gt; <strong>Apps Script</strong>
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/40 p-3.5 rounded-xl border border-white/5 space-y-1">
+                  <span className="inline-block px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold text-[11px]">
+                    ขั้นตอนที่ 2
+                  </span>
+                  <p className="font-semibold text-white">วางโค้ด Apps Script</p>
+                  <p className="text-[11px] text-slate-300">
+                    ลบโค้ดเดิมใน <code>Code.gs</code> ออกทั้งหมด แล้วกดปุ่ม <strong>"คัดลอกโค้ด Apps Script"</strong> ด้านบนไปวาง แล้วกดบันทึก
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/40 p-3.5 rounded-xl border border-white/5 space-y-1">
+                  <span className="inline-block px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold text-[11px]">
+                    ขั้นตอนที่ 3 (สำคัญมาก)
+                  </span>
+                  <p className="font-semibold text-white">Deploy เป็นเว็บแอป</p>
+                  <p className="text-[11px] text-slate-300">
+                    กด <strong>การทำให้ใช้งานได้ (Deploy)</strong> &gt; เลือก <strong>เว็บแอป (Web app)</strong> โดยตั้งค่า:<br/>
+                    • การดำเนินการ: <strong>ฉัน (Me)</strong><br/>
+                    • ผู้มีสิทธิ์เข้าถึง: <strong>ทุกคน (Anyone)</strong>
+                  </p>
+                </div>
+
+                <div className="bg-slate-950/40 p-3.5 rounded-xl border border-white/5 space-y-1">
+                  <span className="inline-block px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold text-[11px]">
+                    ขั้นตอนที่ 4
+                  </span>
+                  <p className="font-semibold text-white">นำ URL มาเชื่อมต่อ</p>
+                  <p className="text-[11px] text-slate-300">
+                    คัดลอก <strong>URL เว็บแอป (Web App URL)</strong> มาวางในช่องด้านบน แล้วกด <strong>บันทึก URL</strong> ระบบจะเชื่อมโยงทันที!
+                  </p>
+                </div>
+              </div>
+
+              {/* Code Preview Box */}
+              {showScriptPreview && (
+                <div className="relative mt-4 bg-slate-950 rounded-xl border border-emerald-500/30 overflow-hidden text-left animate-in fade-in">
+                  <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800 text-xs text-slate-400">
+                    <span className="font-mono text-emerald-400 font-semibold flex items-center gap-1.5">
+                      <Code className="w-3.5 h-3.5" />
+                      Code.gs (Google Apps Script)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyScript}
+                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-all"
+                    >
+                      {isCopyingScript ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      <span>{isCopyingScript ? 'คัดลอกแล้ว' : 'คัดลอกโค้ด'}</span>
+                    </button>
+                  </div>
+                  <pre className="p-4 text-xs font-mono text-emerald-200/90 overflow-x-auto max-h-72 overflow-y-auto leading-relaxed select-all">
+                    {GOOGLE_APPS_SCRIPT_CODE}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Configuration Form Card */}
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
             <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
               <Settings className="w-4 h-4 text-slate-600" />
-              กำหนดลิงก์ Google Sheets ของระบบ
+              กำหนดลิงก์ Google Sheets ของระบบ (หรือ Spreadsheet ID)
             </h4>
 
             {sheetSaveStatus && (
