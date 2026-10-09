@@ -26,6 +26,7 @@ interface DashboardProps {
   vehicles: Vehicle[];
   inspections: InspectionRecord[];
   peaBranches?: string[];
+  isAdmin?: boolean;
   onStartInspection: (vehicleId?: string) => void;
   onNavigateToTab: (tab: 'inspect' | 'vehicles' | 'history' | 'admin') => void;
   isSheetsConnected: boolean;
@@ -37,6 +38,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   vehicles,
   inspections,
   peaBranches,
+  isAdmin = false,
   onStartInspection,
   onNavigateToTab,
   isSheetsConnected,
@@ -648,12 +650,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              {spreadsheetInfo?.url && (
+              {isAdmin && spreadsheetInfo?.url && (
                 <a
                   href={spreadsheetInfo.url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all active:scale-98"
+                  title="เปิดดูสเปรดชีต Google Sheets (เฉพาะผู้ดูแลระบบ)"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" />
                   <span>เปิดดูสเปรดชีต Google Sheets</span>

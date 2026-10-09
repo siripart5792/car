@@ -912,17 +912,19 @@ export default function App() {
               <span className="hidden md:inline">{isFetchingFromSheets ? 'กำลังดึง...' : 'ดึงข้อมูล'}</span>
             </button>
 
-            <a
-              href={spreadsheetInfo?.url || DEFAULT_SPREADSHEET_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition-all text-xs font-bold shadow-xs active:scale-98"
-              title={`เปิดดู Google Sheet: ${spreadsheetInfo?.title || 'ระบบตรวจเช็คสภาพยานพาหนะ'}`}
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">เปิดดู Google Sheets</span>
-              <ExternalLink className="w-3 h-3" />
-            </a>
+            {isAdmin && (
+              <a
+                href={spreadsheetInfo?.url || DEFAULT_SPREADSHEET_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition-all text-xs font-bold shadow-xs active:scale-98"
+                title={`เปิดดู Google Sheet: ${spreadsheetInfo?.title || 'ระบบตรวจเช็คสภาพยานพาหนะ'} (เฉพาะผู้ดูแลระบบ)`}
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">เปิดดู Google Sheets</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
 
             {/* Mobile menu hamburger */}
             <button
@@ -1008,14 +1010,15 @@ export default function App() {
             vehicles={vehicles}
             inspections={inspections}
             peaBranches={peaBranches}
+            isAdmin={isAdmin}
             onStartInspection={handleStartInspectionForVehicle}
             onNavigateToTab={(tab) => setActiveTab(tab)}
             isSheetsConnected={isSheetsConnected}
             spreadsheetInfo={spreadsheetInfo}
-            onOpenSheets={() => {
+            onOpenSheets={isAdmin ? () => {
               const url = spreadsheetInfo?.url || DEFAULT_SPREADSHEET_URL;
               window.open(url, '_blank', 'noopener,noreferrer');
-            }}
+            } : undefined}
           />
         )}
 
@@ -1024,6 +1027,7 @@ export default function App() {
             vehicles={vehicles}
             checklistTemplates={checklistTemplates}
             preselectedVehicleId={preselectedVehicleId}
+            isAdmin={isAdmin}
             isSheetsConnected={isSheetsConnected}
             spreadsheetInfo={spreadsheetInfo}
             onConnectSheets={async () => { await handleGoogleLogin(); }}
@@ -1054,10 +1058,10 @@ export default function App() {
             filterVehicleId={historyFilterVehicleId}
             isAdmin={isAdmin}
             onDeleteRecord={handleDeleteInspection}
-            onOpenSheets={() => {
+            onOpenSheets={isAdmin ? () => {
               const url = spreadsheetInfo?.url || DEFAULT_SPREADSHEET_URL;
               window.open(url, '_blank', 'noopener,noreferrer');
-            }}
+            } : undefined}
             isSheetsConnected={isSheetsConnected}
           />
         )}

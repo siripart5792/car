@@ -32,6 +32,7 @@ interface InspectionFormProps {
   vehicles: Vehicle[];
   checklistTemplates: ChecklistTemplatesState;
   preselectedVehicleId?: string | null;
+  isAdmin?: boolean;
   isSheetsConnected: boolean;
   spreadsheetInfo?: SpreadsheetInfo | null;
   onSaveInspection: (record: Omit<InspectionRecord, 'id' | 'createdAt'>) => Promise<void>;
@@ -43,6 +44,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
   vehicles,
   checklistTemplates,
   preselectedVehicleId,
+  isAdmin = false,
   isSheetsConnected,
   spreadsheetInfo,
   onSaveInspection,
@@ -304,15 +306,18 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
               </div>
             </div>
 
-            <a
-              href={spreadsheetInfo.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all shrink-0 self-start sm:self-auto"
-            >
-              <span>เปิดดูในชีต</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+            {isAdmin && spreadsheetInfo?.url && (
+              <a
+                href={spreadsheetInfo.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all shrink-0 self-start sm:self-auto"
+                title="เปิดดูใน Google Sheets (เฉพาะผู้ดูแลระบบ)"
+              >
+                <span>เปิดดูในชีต (Admin)</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
           </div>
         ) : onConnectSheets ? (
           <div className="mt-5 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-left flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -771,14 +776,15 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
                 <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
                 ลิงก์ Google Sheets อัตโนมัติ (บันทึกลงชีตทันที ไม่ต้องกดซิงค์)
               </span>
-              {spreadsheetInfo && (
+              {isAdmin && spreadsheetInfo && (
                 <a
                   href={spreadsheetInfo.url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-emerald-700 hover:text-emerald-900 font-semibold underline flex items-center gap-1"
+                  title="ดูสเปรดชีต Google Sheets (เฉพาะผู้ดูแลระบบ)"
                 >
-                  <span>ดูสเปรดชีต</span>
+                  <span>ดูสเปรดชีต (Admin)</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
               )}

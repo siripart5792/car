@@ -120,10 +120,11 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
           </p>
         </div>
 
-        {isSheetsConnected && onOpenSheets && (
+        {isAdmin && isSheetsConnected && onOpenSheets && (
           <button
             onClick={onOpenSheets}
             className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-medium text-xs rounded-xl transition-all self-start sm:self-auto"
+            title="เปิดสเปรดชีต Google Sheets (เฉพาะผู้ดูแลระบบ)"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
             เปิดสเปรดชีต Google Sheets
