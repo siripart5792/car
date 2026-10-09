@@ -1,4 +1,4 @@
-import { Vehicle, InspectionRecord, AdminUser } from '../types/vehicle';
+import { Vehicle, InspectionRecord, AdminUser, ChecklistTemplatesState, InspectionCategoryTemplate } from '../types/vehicle';
 
 const SPREADSHEET_STORAGE_KEY = 'vehicle_inspection_spreadsheet_id';
 const SPREADSHEET_INFO_STORAGE_KEY = 'vehicle_inspection_spreadsheet_info_v3';
@@ -49,7 +49,11 @@ export const ADMIN_ROLE_LABELS: Record<string, string> = {
 export const DEFAULT_SPREADSHEET_ID = '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms';
 export const DEFAULT_SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}/edit`;
 
-export const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbxM-so9M9me64MEVH8KLf4FBqkpqypLHU0Dtdi2yP4FZNvbDuQIKO_dzKjqkRQPx5Bc/exec';
+export const OLD_DEFAULT_WEBHOOK_URLS = [
+  'https://script.google.com/macros/s/AKfycbxM-so9M9me64MEVH8KLf4FBqkpqypLHU0Dtdi2yP4FZNvbDuQIKO_dzKjqkRQPx5Bc/exec',
+];
+
+export const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbz6aqVV2AZwik8BEfVGH52HXxSnagzz83fh3zATvJ_009zGv8Jo-G1UgjD2aRQD1dqo/exec';
 
 export const DEFAULT_SPREADSHEET_INFO: SpreadsheetInfo = {
   id: DEFAULT_SPREADSHEET_ID,
@@ -89,8 +93,15 @@ export const saveSpreadsheetInfo = (info: SpreadsheetInfo): void => {
 export const getSavedWebhookUrl = (): string => {
   const saved = localStorage.getItem(WEBHOOK_URL_STORAGE_KEY);
   if (saved && saved.trim()) {
-    return saved.trim();
+    const trimmed = saved.trim();
+    // If the saved URL is one of the previous defaults, automatically migrate to the new default URL
+    if (OLD_DEFAULT_WEBHOOK_URLS.includes(trimmed)) {
+      localStorage.setItem(WEBHOOK_URL_STORAGE_KEY, DEFAULT_WEBHOOK_URL);
+      return DEFAULT_WEBHOOK_URL;
+    }
+    return trimmed;
   }
+  localStorage.setItem(WEBHOOK_URL_STORAGE_KEY, DEFAULT_WEBHOOK_URL);
   return DEFAULT_WEBHOOK_URL;
 };
 
@@ -204,6 +215,7 @@ export async function fetchDataFromAppsScript(url: string): Promise<{
   vehicles?: Vehicle[];
   inspections?: InspectionRecord[];
   branches?: string[];
+  checklistTemplates?: ChecklistTemplatesState;
   sheetTitle?: string;
   sheetId?: string;
   sheetUrl?: string;
@@ -225,6 +237,7 @@ export async function fetchDataFromAppsScript(url: string): Promise<{
           vehicles: json.data.vehicles || [],
           inspections: json.data.inspections || [],
           branches: json.data.branches || [],
+          checklistTemplates: json.data.checklistTemplates,
           sheetTitle: json.data.spreadsheetTitle,
           sheetId: json.data.spreadsheetId,
           sheetUrl: json.data.spreadsheetUrl,
@@ -243,6 +256,7 @@ export async function fetchDataFromAppsScript(url: string): Promise<{
         vehicles: json.data.vehicles || [],
         inspections: json.data.inspections || [],
         branches: json.data.branches || [],
+        checklistTemplates: json.data.checklistTemplates,
         sheetTitle: json.data.spreadsheetTitle,
         sheetId: json.data.spreadsheetId,
         sheetUrl: json.data.spreadsheetUrl,
@@ -264,6 +278,7 @@ export async function syncAllViaAppsScript(
     inspections: InspectionRecord[];
     branches: string[];
     adminUsers?: any[];
+    checklistTemplates?: ChecklistTemplatesState;
   }
 ): Promise<{ success: boolean; message: string }> {
   try {
@@ -277,6 +292,27 @@ export async function syncAllViaAppsScript(
     throw new Error(res?.message || 'ซิงค์ข้อมูลไม่สำเร็จ');
   } catch (err: any) {
     throw new Error(err?.message || 'ไม่สามารถส่งข้อมูลไปยัง Apps Script ได้');
+  }
+}
+
+/**
+ * Sync only checklist templates (3 sheets) via Apps Script Web App
+ */
+export async function syncChecklistTemplatesViaAppsScript(
+  url: string,
+  templates: ChecklistTemplatesState
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await callAppsScriptApi(url, {
+      action: 'saveChecklistTemplates',
+      checklistTemplates: templates,
+    });
+    if (res && res.success) {
+      return { success: true, message: res.message || 'ซิงค์รายการตรวจเช็คลง Google Sheets สำเร็จ' };
+    }
+    throw new Error(res?.message || 'ซิงค์รายการตรวจเช็คไม่สำเร็จ');
+  } catch (err: any) {
+    throw new Error(err?.message || 'ไม่สามารถส่งรายการตรวจเช็คไปยัง Apps Script ได้');
   }
 }
 
@@ -851,3 +887,66 @@ export async function syncBranchSummaryToSheet(
     throw new Error('ไม่สามารถบันทึกข้อมูลสรุปแยกตามการไฟฟ้าลง Google Sheets ได้');
   }
 }
+
+/**
+ * Sync Checklist Templates (3 Categories) to Google Sheets via Direct Sheets API
+ */
+export async function syncChecklistTemplatesToSheet(
+  accessToken: string,
+  spreadsheetId: string,
+  templates: ChecklistTemplatesState
+): Promise<void> {
+  const configs: { name: string; categories: InspectionCategoryTemplate[] }[] = [
+    { name: 'รายการตรวจ_ยานพาหนะทั่วไป', categories: templates.general || [] },
+    { name: 'รายการตรวจ_รถบรรทุกติดเครน', categories: templates.crane_truck || [] },
+    { name: 'รายการตรวจ_รถกระเช้าClassC', categories: templates.bucket_truck_class_c || [] },
+  ];
+
+  for (const cfg of configs) {
+    const rows = [
+      ['ลำดับ', 'หมวดหมู่งานตรวจ', 'รหัสรายการ', 'หัวข้อตรวจเช็ค', 'คำอธิบายและเกณฑ์การตรวจ', 'สถานะใช้งาน', 'อัปเดตล่าสุด'],
+    ];
+
+    let runningNo = 1;
+    for (const cat of cfg.categories) {
+      for (const item of cat.items) {
+        rows.push([
+          String(runningNo++),
+          cat.category,
+          item.id,
+          item.title,
+          item.description || '',
+          'ใช้งาน',
+          new Date().toLocaleString('th-TH'),
+        ]);
+      }
+    }
+
+    try {
+      // Clear old rows
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(cfg.name)}'!A1:G${Math.max(rows.length + 20, 100)}:clear`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+
+      // Write new rows
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(cfg.name)}'!A1?valueInputOption=USER_ENTERED`,
+        {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ values: rows }),
+        }
+      );
+    } catch (e) {
+      console.warn(`Could not sync ${cfg.name} directly via OAuth:`, e);
+    }
+  }
+}
+

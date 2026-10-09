@@ -1070,20 +1070,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 )}
               </div>
               <div>
-                <h3 className="font-bold text-slate-900 text-base">
-                  {subTab === 'general_checklist'
-                    ? 'รายการตรวจเช็ค: 1. ยานพาหนะทั่วไป'
-                    : subTab === 'crane_checklist'
-                    ? 'รายการตรวจเช็ค: 2. รถบรรทุกติดเครนไฮดรอลิค'
-                    : 'รายการตรวจเช็ค: 3. รถกระเช้า Class C (ฮอทไลน์ / ฉนวนไฟฟ้า)'}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  รวม {currentCategoryList.length} หมวดหมู่ ({currentCategoryList.reduce((acc, c) => acc + c.items.length, 0)} รายการตรวจ)
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-slate-900 text-base">
+                    {subTab === 'general_checklist'
+                      ? 'รายการตรวจเช็ค: 1. ยานพาหนะทั่วไป'
+                      : subTab === 'crane_checklist'
+                      ? 'รายการตรวจเช็ค: 2. รถบรรทุกติดเครนไฮดรอลิค'
+                      : 'รายการตรวจเช็ค: 3. รถกระเช้า Class C (ฮอทไลน์ / ฉนวนไฟฟ้า)'}
+                  </h3>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
+                    <span>ชีท: {subTab === 'general_checklist' ? 'รายการตรวจ_ยานพาหนะทั่วไป' : subTab === 'crane_checklist' ? 'รายการตรวจ_รถบรรทุกติดเครน' : 'รายการตรวจ_รถกระเช้าClassC'}</span>
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  รวม {currentCategoryList.length} หมวดหมู่ ({currentCategoryList.reduce((acc, c) => acc + c.items.length, 0)} รายการตรวจ) • ปรับปรุงที่นี่จะซิงค์กับ Google Sheets อัตโนมัติ
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => onUpdateTemplates(checklistTemplates)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-semibold transition-all active:scale-98"
+                title="ซิงค์รายการตรวจเช็คชุดนี้ลง Google Sheets ทันที"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+                ซิงค์ชีททันที
+              </button>
               <button
                 onClick={() => setConfirmResetTemplates(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-200 hover:bg-slate-50 text-slate-600 rounded-xl text-xs font-semibold transition-all"
@@ -1554,64 +1569,126 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-all disabled:opacity-50"
                 >
                   <RefreshCw className={`w-4 h-4 ${isSyncingAllSheets ? 'animate-spin' : ''}`} />
-                  <span>{isSyncingAllSheets ? 'กำลังซิงค์...' : 'ซิงค์ข้อมูลทั้ง 4 แผ่นงานทันที'}</span>
+                  <span>{isSyncingAllSheets ? 'กำลังซิงค์...' : 'ซิงค์ข้อมูลทั้ง 8 แผ่นงานทันที'}</span>
                 </button>
               )}
             </div>
           </div>
 
-          {/* 4 Sheets Breakdown Card */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 1</span>
-                <span className="p-1 rounded-lg bg-blue-50 text-blue-600">
-                  <ListChecks className="w-4 h-4" />
-                </span>
-              </div>
-              <h4 className="font-bold text-slate-900 text-sm">ประวัติการตรวจเช็ค</h4>
-              <p className="text-xs text-slate-500 mt-1">
-                บันทึกผลการตรวจสภาพรถทุกคัน ทะเบียน คนขับ เลขไมล์ ข้อชำรุด และผลการอนุมัติ
-              </p>
+          {/* 8 Sheets Breakdown Card */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                โครงสร้างแผ่นงานทั้งหมดใน Google Sheets (8 แผ่นงาน)
+              </h4>
+              <span className="text-xs text-blue-600 font-medium">
+                ดึงข้อมูลอัตโนมัติทุกครั้งที่เปิดหน้าระบบหรือรีเฟรช
+              </span>
             </div>
-
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 2</span>
-                <span className="p-1 rounded-lg bg-amber-50 text-amber-600">
-                  <Car className="w-4 h-4" />
-                </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 1</span>
+                  <span className="p-1 rounded-lg bg-blue-50 text-blue-600">
+                    <ListChecks className="w-4 h-4" />
+                  </span>
+                </div>
+                <h4 className="font-bold text-slate-900 text-sm">ประวัติการตรวจเช็ค</h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  บันทึกผลการตรวจสภาพรถทุกคัน ทะเบียน คนขับ เลขไมล์ ข้อชำรุด และผลการอนุมัติ
+                </p>
               </div>
-              <h4 className="font-bold text-slate-900 text-sm">ข้อมูลยานพาหนะ</h4>
-              <p className="text-xs text-slate-500 mt-1">
-                ทะเบียน ยี่ห้อ รุ่น การไฟฟ้าที่สังกัด ประเภทรถ เชื้อเพลิง และสถานะพร้อมใช้งาน
-              </p>
-            </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 3</span>
-                <span className="p-1 rounded-lg bg-purple-50 text-purple-600">
-                  <Users className="w-4 h-4" />
-                </span>
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 2</span>
+                  <span className="p-1 rounded-lg bg-amber-50 text-amber-600">
+                    <Car className="w-4 h-4" />
+                  </span>
+                </div>
+                <h4 className="font-bold text-slate-900 text-sm">ข้อมูลยานพาหนะ</h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  ทะเบียน ยี่ห้อ รุ่น การไฟฟ้าที่สังกัด ประเภทรถ เชื้อเพลิง และสถานะพร้อมใช้งาน
+                </p>
               </div>
-              <h4 className="font-bold text-slate-900 text-sm">ข้อมูลผู้ดูแลระบบ</h4>
-              <p className="text-xs text-slate-500 mt-1">
-                รายชื่อผู้ดูแลระบบ บทบาทสิทธิ์ (Super Admin, Admin, Supervisor) และสังกัด
-              </p>
-            </div>
 
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 4</span>
-                <span className="p-1 rounded-lg bg-indigo-50 text-indigo-600">
-                  <Building className="w-4 h-4" />
-                </span>
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 3</span>
+                  <span className="p-1 rounded-lg bg-purple-50 text-purple-600">
+                    <Users className="w-4 h-4" />
+                  </span>
+                </div>
+                <h4 className="font-bold text-slate-900 text-sm">ข้อมูลผู้ดูแลระบบ</h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  รายชื่อผู้ดูแลระบบ บทบาทสิทธิ์ (Super Admin, Admin, Supervisor) และสังกัด
+                </p>
               </div>
-              <h4 className="font-bold text-slate-900 text-sm">สรุปแยกตามการไฟฟ้า</h4>
-              <p className="text-xs text-slate-500 mt-1">
-                สรุปยอดรวมรถและสถิติการตรวจสภาพประจำวันแยกตามแต่ละการไฟฟ้า (PEA Branch)
-              </p>
+
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 4</span>
+                  <span className="p-1 rounded-lg bg-indigo-50 text-indigo-600">
+                    <Building className="w-4 h-4" />
+                  </span>
+                </div>
+                <h4 className="font-bold text-slate-900 text-sm">สรุปแยกตามการไฟฟ้า</h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  สรุปยอดรวมรถและสถิติการตรวจสภาพประจำวันแยกตามแต่ละการไฟฟ้า (PEA Branch)
+                </p>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-400">แผ่นงานที่ 5</span>
+                  <span className="p-1 rounded-lg bg-teal-50 text-teal-600">
+                    <Building className="w-4 h-4" />
+                  </span>
+                </div>
+                <h4 className="font-bold text-slate-900 text-sm">รายชื่อการไฟฟ้า</h4>
+                <p className="text-xs text-slate-500 mt-1">
+                  รายชื่อสำนักงานและสาขาการไฟฟ้าส่วนภูมิภาคทั้งหมดที่เปิดใช้งานในระบบ
+                </p>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-emerald-600">แผ่นงานที่ 6 (รายการตรวจ)</span>
+                  <span className="p-1 rounded-lg bg-emerald-100 text-emerald-700">
+                    <Car className="w-4 h-4" />
+                  </span>
+                </div>
+                <h4 className="font-bold text-slate-900 text-sm">รายการตรวจ_ยานพาหนะทั่วไป</h4>
+                <p className="text-xs text-slate-600 mt-1">
+                  หมวดหมู่และหัวข้อตรวจเช็คสำหรับรถทั่วไป เพิ่ม ลบ แก้ไขรายการได้ทั้งในระบบและในชีท
+                </p>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/20 shadow-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-amber-600">แผ่นงานที่ 7 (รายการตรวจ)</span>
+                  <span className="p-1 rounded-lg bg-amber-100 text-amber-700">
+                    <Wrench className="w-4 h-4" />
+                  </span>
+                </div>
+                <h4 className="font-bold text-slate-900 text-sm">รายการตรวจ_รถบรรทุกติดเครน</h4>
+                <p className="text-xs text-slate-600 mt-1">
+                  หัวข้อตรวจขาค้ำยัน บูม วินช์ สลิง ตะขอ และระบบเซฟตี้เครนไฮดรอลิค ซิงค์แบบ Realtime
+                </p>
+              </div>
+
+              <div className="bg-white p-4 rounded-2xl border border-purple-200 bg-purple-50/20 shadow-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-purple-600">แผ่นงานที่ 8 (รายการตรวจ)</span>
+                  <span className="p-1 rounded-lg bg-purple-100 text-purple-700">
+                    <Zap className="w-4 h-4" />
+                  </span>
+                </div>
+                <h4 className="font-bold text-slate-900 text-sm">รายการตรวจ_รถกระเช้าClassC</h4>
+                <p className="text-xs text-slate-600 mt-1">
+                  หัวข้อตรวจฉนวนไฟเบอร์กลาส บูม ตัวกระเช้า สายดิน PTO และระบบฉุกเฉิน Class C
+                </p>
+              </div>
             </div>
           </div>
 
