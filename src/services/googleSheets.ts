@@ -216,6 +216,7 @@ export async function fetchDataFromAppsScript(url: string): Promise<{
   inspections?: InspectionRecord[];
   branches?: string[];
   checklistTemplates?: ChecklistTemplatesState;
+  adminUsers?: AdminUser[];
   sheetTitle?: string;
   sheetId?: string;
   sheetUrl?: string;
@@ -238,6 +239,7 @@ export async function fetchDataFromAppsScript(url: string): Promise<{
           inspections: json.data.inspections || [],
           branches: json.data.branches || [],
           checklistTemplates: json.data.checklistTemplates,
+          adminUsers: json.data.adminUsers || [],
           sheetTitle: json.data.spreadsheetTitle,
           sheetId: json.data.spreadsheetId,
           sheetUrl: json.data.spreadsheetUrl,
@@ -257,6 +259,7 @@ export async function fetchDataFromAppsScript(url: string): Promise<{
         inspections: json.data.inspections || [],
         branches: json.data.branches || [],
         checklistTemplates: json.data.checklistTemplates,
+        adminUsers: json.data.adminUsers || [],
         sheetTitle: json.data.spreadsheetTitle,
         sheetId: json.data.spreadsheetId,
         sheetUrl: json.data.spreadsheetUrl,
@@ -277,7 +280,7 @@ export async function syncAllViaAppsScript(
     vehicles: Vehicle[];
     inspections: InspectionRecord[];
     branches: string[];
-    adminUsers?: any[];
+    adminUsers?: AdminUser[];
     checklistTemplates?: ChecklistTemplatesState;
   }
 ): Promise<{ success: boolean; message: string }> {
@@ -292,6 +295,71 @@ export async function syncAllViaAppsScript(
     throw new Error(res?.message || 'ซิงค์ข้อมูลไม่สำเร็จ');
   } catch (err: any) {
     throw new Error(err?.message || 'ไม่สามารถส่งข้อมูลไปยัง Apps Script ได้');
+  }
+}
+
+/**
+ * Sync Admin Users to Google Sheets via Apps Script Web App (Sheet: 'ข้อมูลผู้ดูแลระบบ')
+ */
+export async function syncAdminUsersViaAppsScript(
+  url: string,
+  admins: AdminUser[]
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await callAppsScriptApi(url, {
+      action: 'saveAdminUsers',
+      adminUsers: admins,
+    });
+    if (res && res.success) {
+      return { success: true, message: res.message || 'ซิงค์ข้อมูลผู้ดูแลระบบลง Google Sheets สำเร็จ' };
+    }
+    throw new Error(res?.message || 'ซิงค์ข้อมูลผู้ดูแลระบบไม่สำเร็จ');
+  } catch (err: any) {
+    throw new Error(err?.message || 'ไม่สามารถส่งข้อมูลผู้ดูแลระบบไปยัง Apps Script ได้');
+  }
+}
+
+/**
+ * Upsert single Admin User via Apps Script Web App
+ */
+export async function syncSingleAdminUserViaAppsScript(
+  url: string,
+  adminUser: AdminUser
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await callAppsScriptApi(url, {
+      action: 'saveAdminUser',
+      adminUser,
+    });
+    if (res && res.success) {
+      return { success: true, message: res.message || 'บันทึกผู้ดูแลระบบลง Google Sheets สำเร็จ' };
+    }
+    throw new Error(res?.message || 'บันทึกผู้ดูแลระบบไม่สำเร็จ');
+  } catch (err: any) {
+    throw new Error(err?.message || 'ไม่สามารถส่งข้อมูลผู้ดูแลระบบไปยัง Apps Script ได้');
+  }
+}
+
+/**
+ * Delete single Admin User via Apps Script Web App
+ */
+export async function deleteAdminUserViaAppsScript(
+  url: string,
+  adminId: string,
+  username?: string
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await callAppsScriptApi(url, {
+      action: 'deleteAdminUser',
+      adminId,
+      username,
+    });
+    if (res && res.success) {
+      return { success: true, message: res.message || 'ลบผู้ดูแลระบบจาก Google Sheets สำเร็จ' };
+    }
+    throw new Error(res?.message || 'ลบผู้ดูแลระบบไม่สำเร็จ');
+  } catch (err: any) {
+    throw new Error(err?.message || 'ไม่สามารถส่งคำสั่งลบไปยัง Apps Script ได้');
   }
 }
 

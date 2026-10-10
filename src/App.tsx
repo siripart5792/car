@@ -37,6 +37,7 @@ import {
   saveChecklistTemplates,
   resetChecklistTemplatesToDefault,
   loadAdminUsers,
+  saveAdminUsers,
   loadPeaBranches,
   savePeaBranches,
   getCurrentAdminUser,
@@ -67,6 +68,7 @@ import {
   callAppsScriptApi,
   fetchDataFromAppsScript,
   syncAllViaAppsScript,
+  syncAdminUsersViaAppsScript,
   syncChecklistTemplatesViaAppsScript,
   syncChecklistTemplatesToSheet
 } from './services/googleSheets';
@@ -85,6 +87,7 @@ export default function App() {
   const [inspections, setInspections] = useState<InspectionRecord[]>(() => loadInspections());
   const [peaBranches, setPeaBranches] = useState<string[]>(() => loadPeaBranches());
   const [checklistTemplates, setChecklistTemplates] = useState<ChecklistTemplatesState>(() => loadChecklistTemplates());
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => loadAdminUsers());
 
   // Cross-component navigation state
   const [preselectedVehicleId, setPreselectedVehicleId] = useState<string | null>(null);
@@ -170,7 +173,14 @@ export default function App() {
               savePeaBranches(res.branches);
             }
 
-            // 5. Update spreadsheet info
+            // 5. Update admin users from Google Sheet 'ข้อมูลผู้ดูแลระบบ'
+            if (res.adminUsers && res.adminUsers.length > 0) {
+              setAdminUsers(res.adminUsers);
+              saveAdminUsers(res.adminUsers);
+              updatedItems.push(`ผู้ดูแลระบบ ${res.adminUsers.length} ท่าน`);
+            }
+
+            // 6. Update spreadsheet info
             if (res.sheetTitle && res.sheetId) {
               const info: SpreadsheetInfo = {
                 id: res.sheetId,
@@ -556,11 +566,19 @@ export default function App() {
     }
   };
 
-  // 7. Auto Sync for Admin Users and All 4 Sheets
-  const handleSyncAdminUsers = async (users: any[]) => {
+  // 7. Auto Sync for Admin Users (Sheet: 'ข้อมูลผู้ดูแลระบบ')
+  const handleSyncAdminUsers = async (users: AdminUser[]) => {
+    setAdminUsers(users);
+    saveAdminUsers(users);
+
     const webhookUrl = getSavedWebhookUrl();
     if (webhookUrl) {
-      callAppsScriptApi(webhookUrl, { action: 'syncAll', adminUsers: users }).catch(console.warn);
+      try {
+        await syncAdminUsersViaAppsScript(webhookUrl, users);
+        showToast('บันทึกข้อมูลผู้ดูแลระบบลง Google Sheets สำเร็จ', 'success');
+      } catch (err: any) {
+        console.warn('Apps Script sync admin users failed:', err);
+      }
     }
 
     const currentToken = accessToken || getStoredAccessToken();
@@ -734,6 +752,11 @@ export default function App() {
         if (res.branches && res.branches.length > 0) {
           setPeaBranches(res.branches);
           savePeaBranches(res.branches);
+        }
+        if (res.adminUsers && res.adminUsers.length > 0) {
+          setAdminUsers(res.adminUsers);
+          saveAdminUsers(res.adminUsers);
+          updatedParts.push(`ผู้ดูแลระบบ ${res.adminUsers.length} ท่าน`);
         }
         if (res.sheetTitle && res.sheetId) {
           const info: SpreadsheetInfo = {
@@ -1073,6 +1096,7 @@ export default function App() {
             peaBranches={peaBranches}
             checklistTemplates={checklistTemplates}
             spreadsheetInfo={spreadsheetInfo}
+            adminUsers={adminUsers}
             onAdminAuthChange={handleAdminAuthChange}
             onGoogleLogin={async () => { await handleGoogleLogin(); }}
             onAddVehicle={handleAddVehicle}

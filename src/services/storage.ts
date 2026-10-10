@@ -83,14 +83,10 @@ export const loadAdminUsers = (): AdminUser[] => {
       return INITIAL_ADMIN_USERS;
     }
     const parsed: AdminUser[] = JSON.parse(raw);
-    // Ensure the default admin user with username 'admin' and password 'Pea*123456' always exists
-    const hasAdmin = parsed.some((u) => u.username.toLowerCase() === 'admin');
-    if (!hasAdmin) {
-      const updated = [INITIAL_ADMIN_USERS[0], ...parsed];
-      localStorage.setItem(ADMIN_USERS_KEY, JSON.stringify(updated));
-      return updated;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
     }
-    return parsed;
+    return INITIAL_ADMIN_USERS;
   } catch (e) {
     console.error('Error loading admin users from storage:', e);
     return INITIAL_ADMIN_USERS;

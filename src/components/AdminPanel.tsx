@@ -77,6 +77,7 @@ interface AdminPanelProps {
   onGoogleLogin: () => Promise<void>;
   onAddVehicle: (vehicle: Omit<Vehicle, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onUpdateVehicle: (vehicle: Vehicle) => void;
+  adminUsers?: AdminUser[];
   onDeleteVehicle: (vehicleId: string) => void;
   onStartInspection: (vehicleId: string) => void;
   onUpdateTemplates: (newTemplates: ChecklistTemplatesState) => void;
@@ -104,6 +105,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   peaBranches = [],
   checklistTemplates,
   spreadsheetInfo,
+  adminUsers: propAdminUsers,
   onGoogleLogin,
   onAddVehicle,
   onUpdateVehicle,
@@ -119,9 +121,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onLoadDataFromSheets,
   onAdminAuthChange,
 }) => {
-  // Admin users list state
-  const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => loadAdminUsers());
+  // Admin users list state (synchronized with Google Sheet 'ข้อมูลผู้ดูแลระบบ')
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => {
+    return propAdminUsers && propAdminUsers.length > 0 ? propAdminUsers : loadAdminUsers();
+  });
   const [currentAdmin, setCurrentAdmin] = useState<AdminUser | null>(() => getCurrentAdminUser());
+
+  // Keep adminUsers in sync whenever updated from Google Sheets via props
+  useEffect(() => {
+    if (propAdminUsers && propAdminUsers.length > 0) {
+      setAdminUsers(propAdminUsers);
+    }
+  }, [propAdminUsers]);
 
   // PEA Branches management states (Admin Only)
   const [newBranchInput, setNewBranchInput] = useState('');
@@ -203,7 +214,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   });
 
   // Login form inputs
-  const [loginUsername, setLoginUsername] = useState('admin');
+  const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
@@ -217,11 +228,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
   }, [user]);
 
-  // Username & Password Authentication
+  // Username & Password Authentication (Validated against Google Sheet 'ข้อมูลผู้ดูแลระบบ')
   const handleAdminCredentialsLogin = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanUsername = loginUsername.trim().toLowerCase();
-    const matchedUser = adminUsers.find(
+    const effectiveUsers = adminUsers && adminUsers.length > 0 ? adminUsers : loadAdminUsers();
+    const matchedUser = effectiveUsers.find(
       (u) => u.username.toLowerCase() === cleanUsername && u.password === loginPassword
     );
 
@@ -240,7 +252,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         onAdminAuthChange(true, matchedUser);
       }
     } else {
-      setLoginError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (User หลัก: admin / รหัสผ่าน: Pea*123456)');
+      setLoginError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง');
     }
   };
 
@@ -780,11 +792,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </button>
         </div>
-
-        <div className="mt-4 p-3 bg-slate-50 rounded-xl text-[11px] text-slate-500 text-center space-y-1">
-          <div>🔑 User หลัก: <span className="font-mono font-bold text-slate-800">admin</span></div>
-          <div>🔒 รหัสผ่านเริ่มต้น: <span className="font-mono font-bold text-slate-800">Pea*123456</span></div>
-        </div>
       </div>
     );
   }
@@ -936,22 +943,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                 <Users className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-slate-900 text-base">
-                  จัดการบัญชีผู้ดูแลระบบ (Admin Accounts)
-                </h3>
-                <p className="text-xs text-slate-500">
-                  เพิ่ม ลบ แก้ไข ผู้ดูแลระบบ และกำหนดสิทธิ์การเข้าใช้งาน ({adminUsers.length} บัญชี)
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-slate-900 text-base">
+                    จัดการบัญชีผู้ดูแลระบบ (Admin Accounts)
+                  </h3>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
+                    เชื่อมโยงแผ่นงาน: ข้อมูลผู้ดูแลระบบ
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  ดึงและใช้ข้อมูลจาก Google Sheets แผ่นงาน ข้อมูลผู้ดูแลระบบ ({adminUsers.length} บัญชี)
                 </p>
               </div>
             </div>
 
-            <button
-              onClick={handleOpenAddAdmin}
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all active:scale-98"
-            >
-              <Plus className="w-4 h-4 text-amber-400" />
-              เพิ่มผู้ดูแลระบบใหม่
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {onLoadDataFromSheets && (
+                <button
+                  type="button"
+                  onClick={handlePullData}
+                  disabled={isPullingData}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold transition-all disabled:opacity-50"
+                  title="ดึงข้อมูลผู้ดูแลระบบล่าสุดจาก Google Sheets แผ่นงาน ข้อมูลผู้ดูแลระบบ"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 ${isPullingData ? 'animate-spin' : ''}`} />
+                  {isPullingData ? 'กำลังดึงข้อมูล...' : 'ดึงข้อมูลจาก Sheets'}
+                </button>
+              )}
+              <button
+                onClick={handleOpenAddAdmin}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-xs transition-all active:scale-98"
+              >
+                <Plus className="w-4 h-4 text-amber-400" />
+                เพิ่มผู้ดูแลระบบใหม่
+              </button>
+            </div>
           </div>
 
           {/* Admin Users Grid */}

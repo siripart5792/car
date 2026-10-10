@@ -88,6 +88,14 @@ function doGet(e) {
     });
   }
 
+  if (action === 'getAdmins' || action === 'getAdminUsers') {
+    return createJsonResponse({
+      success: true,
+      adminUsers: readAdmins(ss),
+      count: readAdmins(ss).length
+    });
+  }
+
   return createJsonResponse({
     success: false,
     message: 'ไม่พบคำสั่ง (Unknown action): ' + action
@@ -209,7 +217,66 @@ function doPost(e) {
       });
     }
 
-    // 7. ซิงค์ข้อมูลทั้งหมดทั้ง 8 แผ่นงาน (Bulk Sync)
+    // 7. บันทึกหรืออัปเดตข้อมูลผู้ดูแลระบบทั้งหมด (Admin Users - แผ่นงาน 'ข้อมูลผู้ดูแลระบบ')
+    if (action === 'saveAdminUsers' || action === 'saveAdmins') {
+      var adminsToSave = payload.adminUsers || payload.admins || [];
+      writeAdminUsers(ss, adminsToSave);
+      return createJsonResponse({
+        success: true,
+        message: 'บันทึกข้อมูลผู้ดูแลระบบ ' + adminsToSave.length + ' ท่าน ลง Google Sheets แผ่นงาน ข้อมูลผู้ดูแลระบบ สำเร็จ',
+        adminUsers: readAdmins(ss),
+        count: adminsToSave.length
+      });
+    }
+
+    // 7.1 บันทึกหรืออัปเดตผู้ดูแลระบบ 1 ท่าน (Upsert Single Admin)
+    if (action === 'saveAdminUser') {
+      var singleAdmin = payload.adminUser || payload.admin;
+      if (!singleAdmin || !singleAdmin.username) {
+        return createJsonResponse({ success: false, message: 'ระบุข้อมูลผู้ดูแลระบบ (adminUser is required)' });
+      }
+      var existingAdmins = readAdmins(ss);
+      var adminFound = false;
+      for (var a = 0; a < existingAdmins.length; a++) {
+        if (existingAdmins[a].id === singleAdmin.id || existingAdmins[a].username.toLowerCase() === singleAdmin.username.toLowerCase()) {
+          existingAdmins[a] = singleAdmin;
+          adminFound = true;
+          break;
+        }
+      }
+      if (!adminFound) {
+        existingAdmins.push(singleAdmin);
+      }
+      writeAdminUsers(ss, existingAdmins);
+      return createJsonResponse({
+        success: true,
+        message: 'บันทึกข้อมูลผู้ดูแลระบบ @' + singleAdmin.username + ' สำเร็จ',
+        adminUsers: readAdmins(ss)
+      });
+    }
+
+    // 7.2 ลบผู้ดูแลระบบ 1 ท่าน (Delete Single Admin)
+    if (action === 'deleteAdminUser') {
+      var adminIdToDelete = payload.adminId;
+      var adminUsernameToDelete = payload.username;
+      if (!adminIdToDelete && !adminUsernameToDelete) {
+        return createJsonResponse({ success: false, message: 'ระบุ adminId หรือ username ที่ต้องการลบ' });
+      }
+      var allAdmins = readAdmins(ss);
+      var filteredAdmins = allAdmins.filter(function(u) {
+        if (adminIdToDelete && u.id === adminIdToDelete) return false;
+        if (adminUsernameToDelete && u.username.toLowerCase() === String(adminUsernameToDelete).toLowerCase()) return false;
+        return true;
+      });
+      writeAdminUsers(ss, filteredAdmins);
+      return createJsonResponse({
+        success: true,
+        message: 'ลบผู้ดูแลระบบจาก Google Sheets สำเร็จ',
+        adminUsers: readAdmins(ss)
+      });
+    }
+
+    // 8. ซิงค์ข้อมูลทั้งหมดทั้ง 8 แผ่นงาน (Bulk Sync)
     if (action === 'syncAll') {
       if (payload.vehicles && Array.isArray(payload.vehicles)) {
         writeAllVehicles(ss, payload.vehicles);
@@ -293,6 +360,11 @@ function ensureAllSheetsExist(ss) {
     // ถ้าเป็นแผ่นงานรายการตรวจที่เพิ่งสร้างใหม่หรือว่างเปล่า ให้ใส่ค่าเริ่มต้นทันที
     if (isNew && item.defaultType) {
       populateDefaultChecklistSheet(sheet, item.defaultType);
+    }
+
+    // ถ้าเป็นแผ่นงานผู้ดูแลระบบที่เพิ่งสร้างใหม่หรือว่างเปล่า ให้ใส่ค่าเริ่มต้นทันที
+    if (isNew && item.name === SHEET_ADMINS) {
+      populateDefaultAdminsSheet(sheet);
     }
   });
 }
@@ -690,15 +762,69 @@ function writeAdminUsers(ss, admins) {
     return [
       u.id,
       u.username,
-      u.password || '******',
+      u.password || '',
       u.displayName,
       u.role,
-      u.peaBranch || 'กฟภ. สำนักงานใหญ่',
+      u.peaBranch || 'กฟส.หลังสวน',
       u.email || '-',
       u.phone || '-',
       u.status === 'active' ? 'เปิดใช้งาน' : 'ระงับการใช้งาน',
       Utilities.formatDate(new Date(u.createdAt || new Date()), 'Asia/Bangkok', 'dd/MM/yyyy HH:mm:ss'),
       Utilities.formatDate(new Date(u.updatedAt || new Date()), 'Asia/Bangkok', 'dd/MM/yyyy HH:mm:ss'),
+      JSON.stringify(u)
+    ];
+  });
+
+  sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+}
+
+/**
+ * ใส่บัญชีผู้ดูแลระบบเริ่มต้นสำหรับแผ่นงานที่สร้างใหม่
+ */
+function populateDefaultAdminsSheet(sheet) {
+  var defaultAdmins = [
+    {
+      id: 'admin-root',
+      username: 'admin',
+      password: 'Pea*123456',
+      displayName: 'ผู้ดูแลระบบหลัก (Super Admin)',
+      role: 'super_admin',
+      peaBranch: 'กฟส.หลังสวน',
+      email: 'computerpea2564@gmail.com',
+      phone: '081-234-5678',
+      status: 'active',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-10-07T00:00:00Z'
+    },
+    {
+      id: 'admin-supervisor',
+      username: 'supervisor',
+      password: 'Pea*123456',
+      displayName: 'จป.วิชาชีพ (Fleet Supervisor)',
+      role: 'supervisor',
+      peaBranch: 'กฟส.หลังสวน',
+      email: 'fleet.supervisor@pea.co.th',
+      phone: '089-999-8888',
+      status: 'active',
+      createdAt: '2026-02-01T00:00:00Z',
+      updatedAt: '2026-10-07T00:00:00Z'
+    }
+  ];
+
+  var headers = getAdminHeaders();
+  var rows = defaultAdmins.map(function(u) {
+    return [
+      u.id,
+      u.username,
+      u.password,
+      u.displayName,
+      u.role,
+      u.peaBranch,
+      u.email,
+      u.phone,
+      u.status === 'active' ? 'เปิดใช้งาน' : 'ระงับการใช้งาน',
+      Utilities.formatDate(new Date(u.createdAt), 'Asia/Bangkok', 'dd/MM/yyyy HH:mm:ss'),
+      Utilities.formatDate(new Date(u.updatedAt), 'Asia/Bangkok', 'dd/MM/yyyy HH:mm:ss'),
       JSON.stringify(u)
     ];
   });
@@ -1233,6 +1359,60 @@ function readBranches(ss) {
 }
 
 /**
+ * อ่านข้อมูลผู้ดูแลระบบทั้งหมดจากแผ่นงาน 'ข้อมูลผู้ดูแลระบบ'
+ */
+function readAdmins(ss) {
+  var sheet = ss.getSheetByName(SHEET_ADMINS);
+  if (!sheet) return [];
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return [];
+
+  var result = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (!row[0] && !row[1]) continue; // ข้ามแถวที่ว่างเปล่า
+
+    // ตรวจสอบ JSON_DATA ที่คอลัมน์ 12 (Index 11) ก่อน
+    var jsonRaw = row[11];
+    if (jsonRaw) {
+      try {
+        var parsed = JSON.parse(jsonRaw);
+        if (parsed && (parsed.username || parsed.id)) {
+          // หากในชีตมีการแก้รหัสผ่านโดยตรงที่คอลัมน์ C (Index 2) ให้ใช้ค่าใหม่จากชีต
+          if (row[2] && String(row[2]).trim() !== '' && String(row[2]).trim() !== '******') {
+            parsed.password = String(row[2]).trim();
+          }
+          if (row[1]) parsed.username = String(row[1]).trim();
+          if (row[3]) parsed.displayName = String(row[3]).trim();
+          if (row[4]) parsed.role = (row[4] === 'super_admin' || row[4] === 'ผู้ดูแลระบบหลัก (Super Admin)') ? 'super_admin' : (row[4] === 'supervisor' || row[4] === 'หัวหน้างาน (Supervisor)') ? 'supervisor' : 'admin';
+          if (row[5]) parsed.peaBranch = String(row[5]).trim();
+          if (row[6]) parsed.email = String(row[6]).trim();
+          if (row[7]) parsed.phone = String(row[7]).trim();
+          if (row[8]) parsed.status = (row[8] === 'ระงับการใช้งาน' || row[8] === 'inactive') ? 'inactive' : 'active';
+          result.push(parsed);
+          continue;
+        }
+      } catch (e) {}
+    }
+
+    result.push({
+      id: String(row[0] || 'admin-' + i),
+      username: String(row[1] || '').trim(),
+      password: String(row[2] || '').trim(),
+      displayName: String(row[3] || row[1] || 'ผู้ดูแลระบบ').trim(),
+      role: (row[4] === 'super_admin' || row[4] === 'ผู้ดูแลระบบหลัก (Super Admin)') ? 'super_admin' : (row[4] === 'supervisor' || row[4] === 'หัวหน้างาน (Supervisor)') ? 'supervisor' : 'admin',
+      peaBranch: String(row[5] || 'กฟส.หลังสวน').trim(),
+      email: String(row[6] || '').trim(),
+      phone: String(row[7] || '').trim(),
+      status: (row[8] === 'ระงับการใช้งาน' || row[8] === 'inactive') ? 'inactive' : 'active',
+      createdAt: row[9] ? String(row[9]) : new Date().toISOString(),
+      updatedAt: row[10] ? String(row[10]) : new Date().toISOString()
+    });
+  }
+  return result;
+}
+
+/**
  * โหลดข้อมูลทั้งหมดรวมกัน (รวมทั้ง 8 แผ่นงาน)
  */
 function loadAllDataFromSheets(ss) {
@@ -1241,6 +1421,7 @@ function loadAllDataFromSheets(ss) {
     inspections: readInspections(ss),
     branches: readBranches(ss),
     checklistTemplates: readAllChecklists(ss),
+    adminUsers: readAdmins(ss),
     spreadsheetTitle: ss.getName(),
     spreadsheetId: ss.getId(),
     spreadsheetUrl: ss.getUrl()
