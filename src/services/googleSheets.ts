@@ -46,19 +46,20 @@ export const ADMIN_ROLE_LABELS: Record<string, string> = {
   supervisor: 'หัวหน้างานตรวจสภาพ (Supervisor)',
 };
 
-export const DEFAULT_SPREADSHEET_ID = '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms';
+export const DEFAULT_SPREADSHEET_ID = '1GxIL2KgB01JSU2ZjpXkEGAFIfqSIGYL8VJR-qJAO7ME';
 export const DEFAULT_SPREADSHEET_URL = `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}/edit`;
 
 export const OLD_DEFAULT_WEBHOOK_URLS = [
   'https://script.google.com/macros/s/AKfycbxM-so9M9me64MEVH8KLf4FBqkpqypLHU0Dtdi2yP4FZNvbDuQIKO_dzKjqkRQPx5Bc/exec',
+  'https://script.google.com/macros/s/AKfycbz6aqVV2AZwik8BEfVGH52HXxSnagzz83fh3zATvJ_009zGv8Jo-G1UgjD2aRQD1dqo/exec',
 ];
 
-export const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbz6aqVV2AZwik8BEfVGH52HXxSnagzz83fh3zATvJ_009zGv8Jo-G1UgjD2aRQD1dqo/exec';
+export const DEFAULT_WEBHOOK_URL = 'https://script.google.com/macros/s/AKfycbwCPbPiBkwa-boPKB_sE066zoB47hrVbW5TsGuHEeJ1xjo_sw8yvy1ndkPk3LaqmKhw/exec';
 
 export const DEFAULT_SPREADSHEET_INFO: SpreadsheetInfo = {
   id: DEFAULT_SPREADSHEET_ID,
   url: DEFAULT_SPREADSHEET_URL,
-  title: 'ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน - การไฟฟ้าส่วนภูมิภาค (PEA)',
+  title: 'ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน - บันทึกข้อมูล',
 };
 
 export const getSavedSpreadsheetId = (): string => {
@@ -74,7 +75,10 @@ export const getSavedSpreadsheetInfo = (): SpreadsheetInfo => {
     const raw = localStorage.getItem(SPREADSHEET_INFO_STORAGE_KEY);
     if (!raw) return DEFAULT_SPREADSHEET_INFO;
     const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.id || !parsed.url) return DEFAULT_SPREADSHEET_INFO;
+    if (!parsed || !parsed.id || !parsed.url || parsed.id === '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms') {
+      localStorage.setItem(SPREADSHEET_INFO_STORAGE_KEY, JSON.stringify(DEFAULT_SPREADSHEET_INFO));
+      return DEFAULT_SPREADSHEET_INFO;
+    }
     return parsed;
   } catch (e) {
     return DEFAULT_SPREADSHEET_INFO;

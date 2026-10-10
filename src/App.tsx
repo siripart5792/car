@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Car, 
   ClipboardCheck, 
@@ -63,6 +63,7 @@ import {
   saveSpreadsheetInfo,
   DEFAULT_SPREADSHEET_URL,
   DEFAULT_WEBHOOK_URL,
+  OLD_DEFAULT_WEBHOOK_URLS,
   getSavedWebhookUrl,
   saveWebhookUrl,
   callAppsScriptApi,
@@ -133,88 +134,109 @@ export default function App() {
 
   const isSheetsConnected = !!getSavedWebhookUrl() || (!!(accessToken || getStoredAccessToken()) && !!(spreadsheetInfo || getSavedSpreadsheetInfo()));
 
+  // Pull latest fleet, checklist templates, and inspection history from Google Sheets via Apps Script
+  const handlePullFromSheets = useCallback(async (silent = false) => {
+    const webhookUrl = getSavedWebhookUrl() || DEFAULT_WEBHOOK_URL;
+    if (!webhookUrl) {
+      if (!silent) showToast('กรุณาระบุ URL ของ Google Apps Script ในหน้าตั้งค่าก่อน', 'error');
+      return;
+    }
+    setIsFetchingFromSheets(true);
+    try {
+      if (!silent) showToast('กำลังดึงข้อมูลล่าสุดจาก Google Sheets...', 'info');
+      const res = await fetchDataFromAppsScript(webhookUrl);
+      if (res.success) {
+        let countVehicles = 0;
+        let countInspections = 0;
+        const updatedParts: string[] = [];
+
+        if (res.checklistTemplates) {
+          const ct = res.checklistTemplates;
+          const hasItems =
+            (ct.general && ct.general.length > 0) ||
+            (ct.crane_truck && ct.crane_truck.length > 0) ||
+            (ct.bucket_truck_class_c && ct.bucket_truck_class_c.length > 0);
+          if (hasItems) {
+            setChecklistTemplates(ct);
+            saveChecklistTemplates(ct);
+            updatedParts.push('รายการตรวจเช็ค 3 ประเภท');
+          }
+        }
+
+        if (res.vehicles && res.vehicles.length > 0) {
+          setVehicles(res.vehicles);
+          saveVehicles(res.vehicles);
+          countVehicles = res.vehicles.length;
+          updatedParts.push(`รถ ${countVehicles} คัน`);
+        }
+        if (res.inspections && res.inspections.length > 0) {
+          setInspections(res.inspections);
+          saveInspections(res.inspections);
+          countInspections = res.inspections.length;
+          updatedParts.push(`ประวัติ ${countInspections} รายการ`);
+        }
+        if (res.branches && res.branches.length > 0) {
+          setPeaBranches(res.branches);
+          savePeaBranches(res.branches);
+        }
+        if (res.adminUsers && res.adminUsers.length > 0) {
+          setAdminUsers(res.adminUsers);
+          saveAdminUsers(res.adminUsers);
+          updatedParts.push(`ผู้ดูแลระบบ ${res.adminUsers.length} ท่าน`);
+        }
+        if (res.sheetTitle && res.sheetId) {
+          const info: SpreadsheetInfo = {
+            id: res.sheetId,
+            url: res.sheetUrl || `https://docs.google.com/spreadsheets/d/${res.sheetId}/edit`,
+            title: res.sheetTitle,
+          };
+          setSpreadsheetInfo(info);
+          saveSpreadsheetInfo(info);
+        }
+        if (!silent) {
+          showToast(
+            `ดึงข้อมูลล่าสุดสำเร็จ: ${updatedParts.length > 0 ? updatedParts.join(', ') : 'ข้อมูลเป็นปัจจุบันแล้ว'}`,
+            'success'
+          );
+        }
+      } else {
+        if (!silent) showToast(res.message || 'ไม่สามารถดึงข้อมูลจาก Google Sheets ได้', 'error');
+      }
+    } catch (err: any) {
+      if (!silent) showToast(`ดึงข้อมูลไม่สำเร็จ: ${err?.message || 'เกิดข้อผิดพลาด'}`, 'error');
+    } finally {
+      setIsFetchingFromSheets(false);
+    }
+  }, []);
+
   // 1. Initialize Firebase Auth State Listener & Auto-fetch Google Sheets on initial open / refresh
   useEffect(() => {
-    // Ensure default Google Apps Script Web App URL is saved if not present
+    // Ensure default Google Apps Script Web App URL is migrated and saved automatically
     const existingWebhook = localStorage.getItem('vehicle_inspection_webhook_url');
-    if (!existingWebhook || !existingWebhook.trim()) {
+    if (!existingWebhook || !existingWebhook.trim() || OLD_DEFAULT_WEBHOOK_URLS.includes(existingWebhook.trim())) {
       saveWebhookUrl(DEFAULT_WEBHOOK_URL);
     }
 
     // Auto-fetch shared database from Google Apps Script every time the app opens or refreshes
-    const savedWebhook = getSavedWebhookUrl();
-    if (savedWebhook) {
-      setIsFetchingFromSheets(true);
-      fetchDataFromAppsScript(savedWebhook)
-        .then((res) => {
-          if (res.success) {
-            const updatedItems: string[] = [];
+    handlePullFromSheets(false);
 
-            // 1. Update checklist templates if present
-            if (res.checklistTemplates) {
-              const ct = res.checklistTemplates;
-              const hasItems = 
-                (ct.general && ct.general.length > 0) || 
-                (ct.crane_truck && ct.crane_truck.length > 0) || 
-                (ct.bucket_truck_class_c && ct.bucket_truck_class_c.length > 0);
-              if (hasItems) {
-                setChecklistTemplates(ct);
-                saveChecklistTemplates(ct);
-                updatedItems.push('รายการตรวจเช็ค');
-              }
-            }
+    // Auto-refresh when tab becomes active / visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        handlePullFromSheets(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
 
-            // 2. Update vehicles
-            if (res.vehicles && res.vehicles.length > 0) {
-              setVehicles(res.vehicles);
-              saveVehicles(res.vehicles);
-              updatedItems.push(`ยานพาหนะ ${res.vehicles.length} คัน`);
-            }
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+    };
+  }, [handlePullFromSheets]);
 
-            // 3. Update inspections
-            if (res.inspections && res.inspections.length > 0) {
-              setInspections(res.inspections);
-              saveInspections(res.inspections);
-              updatedItems.push(`ประวัติ ${res.inspections.length} รายการ`);
-            }
-
-            // 4. Update PEA branches
-            if (res.branches && res.branches.length > 0) {
-              setPeaBranches(res.branches);
-              savePeaBranches(res.branches);
-            }
-
-            // 5. Update admin users from Google Sheet 'ข้อมูลผู้ดูแลระบบ'
-            if (res.adminUsers && res.adminUsers.length > 0) {
-              setAdminUsers(res.adminUsers);
-              saveAdminUsers(res.adminUsers);
-              updatedItems.push(`ผู้ดูแลระบบ ${res.adminUsers.length} ท่าน`);
-            }
-
-            // 6. Update spreadsheet info
-            if (res.sheetTitle && res.sheetId) {
-              const info: SpreadsheetInfo = {
-                id: res.sheetId,
-                url: res.sheetUrl || `https://docs.google.com/spreadsheets/d/${res.sheetId}/edit`,
-                title: res.sheetTitle,
-              };
-              setSpreadsheetInfo(info);
-              saveSpreadsheetInfo(info);
-            }
-
-            if (updatedItems.length > 0) {
-              showToast(`ดึงข้อมูลล่าสุดจาก Google Sheets สำเร็จ (${updatedItems.join(', ')})`, 'success');
-            }
-          }
-        })
-        .catch((err) => {
-          console.warn('Could not auto-fetch from Apps Script on mount:', err);
-        })
-        .finally(() => {
-          setIsFetchingFromSheets(false);
-        });
-    }
-
+  // 2. Initialize Firebase Auth State Listener & Google Workspace token check
+  useEffect(() => {
     // Check cached token and auto-fetch/verify spreadsheet immediately on launch
     const cachedToken = getStoredAccessToken();
     if (cachedToken) {
@@ -719,78 +741,7 @@ export default function App() {
     }
   };
 
-  // Pull latest fleet, checklist templates, and inspection history from Google Sheets via Apps Script
-  const handlePullFromSheets = async () => {
-    const webhookUrl = getSavedWebhookUrl();
-    if (!webhookUrl) {
-      showToast('กรุณาระบุ URL ของ Google Apps Script ในหน้าตั้งค่าก่อน', 'error');
-      return;
-    }
-    setIsFetchingFromSheets(true);
-    try {
-      showToast('กำลังดึงข้อมูลล่าสุดจาก Google Sheets...', 'info');
-      const res = await fetchDataFromAppsScript(webhookUrl);
-      if (res.success) {
-        let countVehicles = 0;
-        let countInspections = 0;
-        let updatedParts: string[] = [];
 
-        if (res.checklistTemplates) {
-          const ct = res.checklistTemplates;
-          const hasItems =
-            (ct.general && ct.general.length > 0) ||
-            (ct.crane_truck && ct.crane_truck.length > 0) ||
-            (ct.bucket_truck_class_c && ct.bucket_truck_class_c.length > 0);
-          if (hasItems) {
-            setChecklistTemplates(ct);
-            saveChecklistTemplates(ct);
-            updatedParts.push('รายการตรวจเช็ค 3 ประเภท');
-          }
-        }
-
-        if (res.vehicles && res.vehicles.length > 0) {
-          setVehicles(res.vehicles);
-          saveVehicles(res.vehicles);
-          countVehicles = res.vehicles.length;
-          updatedParts.push(`รถ ${countVehicles} คัน`);
-        }
-        if (res.inspections && res.inspections.length > 0) {
-          setInspections(res.inspections);
-          saveInspections(res.inspections);
-          countInspections = res.inspections.length;
-          updatedParts.push(`ประวัติ ${countInspections} รายการ`);
-        }
-        if (res.branches && res.branches.length > 0) {
-          setPeaBranches(res.branches);
-          savePeaBranches(res.branches);
-        }
-        if (res.adminUsers && res.adminUsers.length > 0) {
-          setAdminUsers(res.adminUsers);
-          saveAdminUsers(res.adminUsers);
-          updatedParts.push(`ผู้ดูแลระบบ ${res.adminUsers.length} ท่าน`);
-        }
-        if (res.sheetTitle && res.sheetId) {
-          const info: SpreadsheetInfo = {
-            id: res.sheetId,
-            url: res.sheetUrl || `https://docs.google.com/spreadsheets/d/${res.sheetId}/edit`,
-            title: res.sheetTitle,
-          };
-          setSpreadsheetInfo(info);
-          saveSpreadsheetInfo(info);
-        }
-        showToast(
-          `ดึงข้อมูลล่าสุดสำเร็จ: ${updatedParts.length > 0 ? updatedParts.join(', ') : 'ข้อมูลเป็นปัจจุบันแล้ว'}`,
-          'success'
-        );
-      } else {
-        showToast(res.message || 'ไม่สามารถดึงข้อมูลจาก Google Sheets ได้', 'error');
-      }
-    } catch (err: any) {
-      showToast(`ดึงข้อมูลไม่สำเร็จ: ${err?.message || 'เกิดข้อผิดพลาด'}`, 'error');
-    } finally {
-      setIsFetchingFromSheets(false);
-    }
-  };
 
   const handleUpdateAccessToken = (token: string) => {
     saveStoredAccessToken(token);
@@ -935,7 +886,7 @@ export default function App() {
               <span>บันทึก Google Sheets อัตโนมัติ</span>
             </div>
             <button
-              onClick={handlePullFromSheets}
+              onClick={() => handlePullFromSheets(false)}
               disabled={isFetchingFromSheets}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 transition-all shadow-xs active:scale-98 ${
                 isFetchingFromSheets ? 'opacity-75 cursor-not-allowed' : ''
@@ -1126,7 +1077,7 @@ export default function App() {
             onUpdateSpreadsheetInfo={(info) => setSpreadsheetInfo(info)}
             onAddPeaBranch={handleAddPeaBranch}
             onDeletePeaBranch={handleDeletePeaBranch}
-            onLoadDataFromSheets={handlePullFromSheets}
+            onLoadDataFromSheets={() => handlePullFromSheets(false)}
           />
         )}
       </main>
