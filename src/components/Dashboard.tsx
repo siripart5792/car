@@ -27,6 +27,7 @@ interface DashboardProps {
   inspections: InspectionRecord[];
   peaBranches?: string[];
   isAdmin?: boolean;
+  canOpenSpreadsheet?: boolean;
   onStartInspection: (vehicleId?: string) => void;
   onNavigateToTab: (tab: 'inspect' | 'vehicles' | 'history' | 'admin') => void;
   isSheetsConnected: boolean;
@@ -39,6 +40,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   inspections,
   peaBranches,
   isAdmin = false,
+  canOpenSpreadsheet = false,
   onStartInspection,
   onNavigateToTab,
   isSheetsConnected,
@@ -650,7 +652,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
 
             <div className="flex items-center gap-2">
-              {isAdmin && spreadsheetInfo?.url && (
+              {canOpenSpreadsheet && spreadsheetInfo?.url && (
                 <a
                   href={spreadsheetInfo.url}
                   target="_blank"

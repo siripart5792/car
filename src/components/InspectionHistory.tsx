@@ -29,6 +29,7 @@ interface InspectionHistoryProps {
   peaBranches?: string[];
   filterVehicleId?: string | null;
   isAdmin?: boolean;
+  canOpenSpreadsheet?: boolean;
   onDeleteRecord: (recordId: string) => void;
   onOpenSheets?: () => void;
   isSheetsConnected: boolean;
@@ -61,6 +62,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
   peaBranches,
   filterVehicleId: initialFilterVehicleId,
   isAdmin = false,
+  canOpenSpreadsheet = false,
   onDeleteRecord,
   onOpenSheets,
   isSheetsConnected,
@@ -120,7 +122,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
           </p>
         </div>
 
-        {isAdmin && isSheetsConnected && onOpenSheets && (
+        {canOpenSpreadsheet && isSheetsConnected && onOpenSheets && (
           <button
             onClick={onOpenSheets}
             className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-medium text-xs rounded-xl transition-all self-start sm:self-auto"

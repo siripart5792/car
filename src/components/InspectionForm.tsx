@@ -33,6 +33,7 @@ interface InspectionFormProps {
   checklistTemplates: ChecklistTemplatesState;
   preselectedVehicleId?: string | null;
   isAdmin?: boolean;
+  canOpenSpreadsheet?: boolean;
   isSheetsConnected: boolean;
   spreadsheetInfo?: SpreadsheetInfo | null;
   onSaveInspection: (record: Omit<InspectionRecord, 'id' | 'createdAt'>) => Promise<void>;
@@ -45,6 +46,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
   checklistTemplates,
   preselectedVehicleId,
   isAdmin = false,
+  canOpenSpreadsheet = false,
   isSheetsConnected,
   spreadsheetInfo,
   onSaveInspection,
@@ -306,7 +308,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
               </div>
             </div>
 
-            {isAdmin && spreadsheetInfo?.url && (
+            {canOpenSpreadsheet && spreadsheetInfo?.url && (
               <a
                 href={spreadsheetInfo.url}
                 target="_blank"
@@ -776,7 +778,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
                 <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
                 ลิงก์ Google Sheets อัตโนมัติ (บันทึกลงชีตทันที ไม่ต้องกดซิงค์)
               </span>
-              {isAdmin && spreadsheetInfo && (
+              {canOpenSpreadsheet && spreadsheetInfo && (
                 <a
                   href={spreadsheetInfo.url}
                   target="_blank"

@@ -19,6 +19,7 @@ import {
   Users, 
   UserCheck, 
   ShieldCheck, 
+  ShieldAlert, 
   User, 
   Phone, 
   Mail,
@@ -78,6 +79,8 @@ interface AdminPanelProps {
   onAddVehicle: (vehicle: Omit<Vehicle, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onUpdateVehicle: (vehicle: Vehicle) => void;
   adminUsers?: AdminUser[];
+  currentAdminUser?: AdminUser | null;
+  canOpenSpreadsheet?: boolean;
   onDeleteVehicle: (vehicleId: string) => void;
   onStartInspection: (vehicleId: string) => void;
   onUpdateTemplates: (newTemplates: ChecklistTemplatesState) => void;
@@ -106,6 +109,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   checklistTemplates,
   spreadsheetInfo,
   adminUsers: propAdminUsers,
+  currentAdminUser: propCurrentAdminUser,
+  canOpenSpreadsheet = false,
   onGoogleLogin,
   onAddVehicle,
   onUpdateVehicle,
@@ -125,7 +130,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => {
     return propAdminUsers && propAdminUsers.length > 0 ? propAdminUsers : loadAdminUsers();
   });
-  const [currentAdmin, setCurrentAdmin] = useState<AdminUser | null>(() => getCurrentAdminUser());
+  const [currentAdmin, setCurrentAdmin] = useState<AdminUser | null>(() => propCurrentAdminUser || getCurrentAdminUser());
+
+  // Keep currentAdmin in sync with prop
+  useEffect(() => {
+    if (propCurrentAdminUser !== undefined) {
+      setCurrentAdmin(propCurrentAdminUser);
+    }
+  }, [propCurrentAdminUser]);
+
+  // Permission check: Role 'supervisor' cannot view, add, edit, or delete admin accounts, and cannot open Google Sheets
+  const isSupervisor = (currentAdmin?.role === 'supervisor') || (propCurrentAdminUser?.role === 'supervisor');
 
   // Keep adminUsers in sync whenever updated from Google Sheets via props
   useEffect(() => {
@@ -304,6 +319,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   const [deletingAdminUserId, setDeletingAdminUserId] = useState<string | null>(null);
 
   const handleOpenAddAdmin = () => {
+    if (isSupervisor) {
+      alert('ระดับสิทธิ์ Supervisor ไม่สามารถเพิ่มผู้ดูแลระบบได้');
+      return;
+    }
     setEditingAdminUser(null);
     setAdminUserFormData({
       username: '',
@@ -321,6 +340,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   const handleOpenEditAdmin = (admin: AdminUser) => {
+    if (isSupervisor) {
+      alert('ระดับสิทธิ์ Supervisor ไม่สามารถแก้ไขข้อมูลผู้ดูแลระบบได้');
+      return;
+    }
     setEditingAdminUser(admin);
     setAdminUserFormData({
       username: admin.username,
@@ -339,6 +362,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const handleSaveAdminUser = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSupervisor) {
+      setAdminUserFormError('ระดับสิทธิ์ Supervisor ไม่มีสิทธิ์ดำเนินการนี้');
+      return;
+    }
     if (!adminUserFormData.username.trim() || !adminUserFormData.displayName.trim()) {
       setAdminUserFormError('กรุณากรอกชื่อผู้ใช้และชื่อที่แสดง');
       return;
@@ -422,7 +449,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   };
 
   const handleConfirmDeleteAdmin = () => {
-    if (!deletingAdminUserId) return;
+    if (!deletingAdminUserId || isSupervisor) {
+      setDeletingAdminUserId(null);
+      return;
+    }
     const adminToDelete = adminUsers.find((u) => u.id === deletingAdminUserId);
 
     if (adminToDelete?.username.toLowerCase() === 'admin') {
@@ -808,9 +838,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               แผงควบคุมผู้ดูแลระบบ
             </span>
             {currentAdmin && (
-              <span className="text-xs text-slate-600 font-medium bg-slate-100 px-2.5 py-1 rounded-full">
-                ผู้ใช้งาน: <strong className="text-slate-800">{currentAdmin.displayName}</strong> (@{currentAdmin.username})
-              </span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs text-slate-600 font-medium bg-slate-100 px-2.5 py-1 rounded-full">
+                  ผู้ใช้งาน: <strong className="text-slate-800">{currentAdmin.displayName}</strong> (@{currentAdmin.username})
+                </span>
+                <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${ROLE_META[currentAdmin.role]?.bg || 'bg-slate-100'}`}>
+                  {ROLE_META[currentAdmin.role]?.label || currentAdmin.role}
+                </span>
+              </div>
             )}
             <button
               onClick={handleAdminLogout}
@@ -824,7 +859,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             การจัดการข้อมูลระบบและผู้ดูแลระบบ
           </h2>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            จัดการยานพาหนะ, รายการตรวจเช็ค 3 ประเภท และบัญชีผู้ดูแลระบบ (เพิ่ม/ลบ/แก้ไข)
+            {isSupervisor
+              ? 'จัดการข้อมูลยานพาหนะ, รายชื่อการไฟฟ้า และรายการตรวจเช็คสภาพรถ 3 ประเภท'
+              : 'จัดการยานพาหนะ, รายการตรวจเช็ค 3 ประเภท และบัญชีผู้ดูแลระบบ (เพิ่ม/ลบ/แก้ไข)'}
           </p>
         </div>
 
@@ -878,18 +915,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             3. กระเช้า Class C
           </button>
 
-          {/* New Tab: Manage Admin Users */}
-          <button
-            onClick={() => setSubTab('admin_users')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              subTab === 'admin_users'
-                ? 'bg-slate-900 text-amber-400 shadow-xs'
-                : 'text-slate-700 hover:text-slate-950 font-bold'
-            }`}
-          >
-            <Users className="w-4 h-4 text-amber-400" />
-            จัดการผู้ดูแลระบบ ({adminUsers.length})
-          </button>
+          {/* New Tab: Manage Admin Users (Hidden for Supervisor) */}
+          {!isSupervisor && (
+            <button
+              onClick={() => setSubTab('admin_users')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                subTab === 'admin_users'
+                  ? 'bg-slate-900 text-amber-400 shadow-xs'
+                  : 'text-slate-700 hover:text-slate-950 font-bold'
+              }`}
+            >
+              <Users className="w-4 h-4 text-amber-400" />
+              จัดการผู้ดูแลระบบ ({adminUsers.length})
+            </button>
+          )}
 
           {/* SubTab: Manage PEA Branches (NEW - Admin Only!) */}
           <button
@@ -933,8 +972,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
         />
       )}
 
-      {/* SubTab 5: Manage Admin Users (NEW!) */}
+      {/* SubTab 5: Manage Admin Users */}
       {subTab === 'admin_users' && (
+        isSupervisor ? (
+          <div className="bg-white p-8 sm:p-12 rounded-3xl border border-rose-200 shadow-xs text-center space-y-4 animate-in fade-in max-w-xl mx-auto my-8">
+            <div className="w-16 h-16 bg-rose-50 border border-rose-200 text-rose-600 rounded-2xl flex items-center justify-center mx-auto shadow-xs">
+              <ShieldAlert className="w-8 h-8" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">ไม่มีสิทธิ์เข้าถึงส่วนจัดการผู้ดูแลระบบ</h3>
+              <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
+                ระดับสิทธิ์ <strong>หัวหน้างาน (Supervisor)</strong> ไม่สามารถดูข้อมูล เพิ่ม แก้ไข หรือลบข้อมูลบัญชีผู้ดูแลระบบได้
+              </p>
+            </div>
+            <div>
+              <button
+                type="button"
+                onClick={() => setSubTab('vehicles')}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all active:scale-98 shadow-xs"
+              >
+                <Car className="w-4 h-4" />
+                <span>กลับสู่หน้ารายการยานพาหนะ</span>
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="space-y-6">
           {/* Header Toolbar */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1071,6 +1133,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             })}
           </div>
         </div>
+        )
       )}
 
       {/* SubTabs 2, 3, 4: Manage Checklist Items for 3 Categories */}
@@ -1569,16 +1632,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              <a
-                href={sheetUrlInput || spreadsheetInfo?.url || 'https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit'}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-all"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>เปิดดู Google Sheets</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
+              {!isSupervisor ? (
+                <a
+                  href={sheetUrlInput || spreadsheetInfo?.url || 'https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-all"
+                  title="เปิดดู Google Sheets ในแท็บใหม่"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>เปิดดู Google Sheets</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              ) : (
+                <div className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-500 rounded-xl text-xs font-semibold border border-slate-200">
+                  <ShieldAlert className="w-3.5 h-3.5 text-slate-400" />
+                  <span>สิทธิ์ Supervisor ไม่สามารถเปิดดูสเปรดชีต Google Sheets ได้</span>
+                </div>
+              )}
 
               {onSyncAllSheets && (
                 <button

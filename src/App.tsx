@@ -99,11 +99,22 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState<boolean>(() => {
     return !!getCurrentAdminUser() || isStoredAdminAuth();
   });
+
+  // Permission helpers:
+  // Role 'supervisor' cannot open/view Google Sheets spreadsheet, and cannot manage admin users.
+  const isSupervisor = currentAdminUser?.role === 'supervisor';
+  const canOpenSpreadsheet = isAdmin && !isSupervisor;
+
   const [accessToken, setAccessToken] = useState<string | null>(() => getStoredAccessToken());
   const [spreadsheetInfo, setSpreadsheetInfo] = useState<SpreadsheetInfo | null>(() => getSavedSpreadsheetInfo());
   const [isConnecting, setIsConnecting] = useState(false);
   const [isFetchingFromSheets, setIsFetchingFromSheets] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Set document title to exact user requirement
+  useEffect(() => {
+    document.title = 'ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน';
+  }, []);
 
   const handleAdminAuthChange = (isLoggedIn: boolean, adminUser: AdminUser | null) => {
     setIsAdmin(isLoggedIn);
@@ -935,7 +946,7 @@ export default function App() {
               <span className="hidden md:inline">{isFetchingFromSheets ? 'กำลังดึง...' : 'ดึงข้อมูล'}</span>
             </button>
 
-            {isAdmin && (
+            {canOpenSpreadsheet && (
               <a
                 href={spreadsheetInfo?.url || DEFAULT_SPREADSHEET_URL}
                 target="_blank"
@@ -1034,11 +1045,12 @@ export default function App() {
             inspections={inspections}
             peaBranches={peaBranches}
             isAdmin={isAdmin}
+            canOpenSpreadsheet={canOpenSpreadsheet}
             onStartInspection={handleStartInspectionForVehicle}
             onNavigateToTab={(tab) => setActiveTab(tab)}
             isSheetsConnected={isSheetsConnected}
-            spreadsheetInfo={spreadsheetInfo}
-            onOpenSheets={isAdmin ? () => {
+            spreadsheetInfo={canOpenSpreadsheet ? spreadsheetInfo : null}
+            onOpenSheets={canOpenSpreadsheet ? () => {
               const url = spreadsheetInfo?.url || DEFAULT_SPREADSHEET_URL;
               window.open(url, '_blank', 'noopener,noreferrer');
             } : undefined}
@@ -1051,8 +1063,9 @@ export default function App() {
             checklistTemplates={checklistTemplates}
             preselectedVehicleId={preselectedVehicleId}
             isAdmin={isAdmin}
+            canOpenSpreadsheet={canOpenSpreadsheet}
             isSheetsConnected={isSheetsConnected}
-            spreadsheetInfo={spreadsheetInfo}
+            spreadsheetInfo={canOpenSpreadsheet ? spreadsheetInfo : null}
             onConnectSheets={async () => { await handleGoogleLogin(); }}
             onSaveInspection={handleSaveInspection}
             onViewHistory={handleViewHistoryForVehicle}
@@ -1080,8 +1093,9 @@ export default function App() {
             peaBranches={peaBranches}
             filterVehicleId={historyFilterVehicleId}
             isAdmin={isAdmin}
+            canOpenSpreadsheet={canOpenSpreadsheet}
             onDeleteRecord={handleDeleteInspection}
-            onOpenSheets={isAdmin ? () => {
+            onOpenSheets={canOpenSpreadsheet ? () => {
               const url = spreadsheetInfo?.url || DEFAULT_SPREADSHEET_URL;
               window.open(url, '_blank', 'noopener,noreferrer');
             } : undefined}
@@ -1097,6 +1111,8 @@ export default function App() {
             checklistTemplates={checklistTemplates}
             spreadsheetInfo={spreadsheetInfo}
             adminUsers={adminUsers}
+            currentAdminUser={currentAdminUser}
+            canOpenSpreadsheet={canOpenSpreadsheet}
             onAdminAuthChange={handleAdminAuthChange}
             onGoogleLogin={async () => { await handleGoogleLogin(); }}
             onAddVehicle={handleAddVehicle}
