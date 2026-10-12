@@ -481,24 +481,72 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // --- PEA Branches Master Data Logic (Admin Only) ---
   const activePeaBranches = peaBranches && peaBranches.length > 0 ? peaBranches : COMMON_PEA_BRANCHES;
 
-  const PRESET_BRANCH_SUGGESTIONS = [
-    'กฟจ.ลำปาง',
-    'กฟจ.เชียงราย',
-    'กฟจ.นครสวรรค์',
-    'กฟจ.สุโขทัย',
-    'กฟจ.อุดรธานี',
-    'กฟจ.สกลนคร',
-    'กฟจ.สุรินทร์',
-    'กฟจ.บุรีรัมย์',
-    'กฟจ.ฉะเชิงเทรา',
-    'กฟจ.ปราจีนบุรี',
-    'กฟจ.ภูเก็ต',
-    'กฟจ.กระบี่',
-    'กฟส.หางดง',
-    'กฟส.แม่ริม',
-    'กฟส.ปากช่อง',
-    'กฟส.หัวหิน',
+  // 1. รายชื่อการไฟฟ้าในเขตพื้นที่จังหวัดชุมพร (ลำดับความสำคัญหลัก)
+  const CHUMPHON_BRANCH_SUGGESTIONS = [
+    'กฟจ.ชุมพร',
+    'กฟส.หลังสวน',
+    'กฟส.ท่าแซะ',
+    'กฟส.สวี',
+    'กฟส.ปะทิว',
+    'กฟส.ทุ่งตะโก',
+    'กฟส.ละแม',
+    'กฟส.พะโต๊ะ',
+    'กฟส.ปากน้ำชุมพร',
+    'กฟส.ดอนยาง',
+    'กฟส.ปากน้ำหลังสวน',
   ];
+
+  // 2. รายชื่อการไฟฟ้าสังกัดเขต 1 ภาคใต้ (กฟต.1 เพชรบุรี: ประจวบคีรีขันธ์, เพชรบุรี, ระนอง, ราชบุรี, สมุทรสงคราม)
+  const SOUTH_REGION_1_BRANCH_SUGGESTIONS = [
+    'กฟภ. เขต 1 (ภาคใต้) จ.เพชรบุรี',
+    // จ.ระนอง (พื้นที่ติดชุมพร)
+    'กฟจ.ระนอง',
+    'กฟส.กระบุรี',
+    'กฟส.กะเปอร์',
+    'กฟส.ละอุ่น',
+    'กฟส.สุขสำราญ',
+    // จ.ประจวบคีรีขันธ์ (พื้นที่ติดชุมพร)
+    'กฟจ.ประจวบคีรีขันธ์',
+    'กฟส.บางสะพาน',
+    'กฟส.บางสะพานน้อย',
+    'กฟส.ทับสะแก',
+    'กฟส.หัวหิน',
+    'กฟส.ปราณบุรี',
+    'กฟส.กุยบุรี',
+    'กฟส.สามร้อยยอด',
+    // จ.เพชรบุรี (ที่ตั้ง สนง.เขต 1 ภาคใต้)
+    'กฟจ.เพชรบุรี',
+    'กฟส.ชะอำ',
+    'กฟส.ท่ายาง',
+    'กฟส.บ้านลาด',
+    'กฟส.เขาย้อย',
+    'กฟส.บ้านแหลม',
+    'กฟส.หนองหญ้าปล้อง',
+    'กฟส.แก่งกระจาน',
+    // จ.ราชบุรี (สังกัดเขต 1 ภาคใต้)
+    'กฟจ.ราชบุรี',
+    'กฟส.โพธาราม',
+    'กฟส.ดำเนินสะดวก',
+    'กฟส.ปากท่อ',
+    'กฟส.จอมบึง',
+    'กฟส.บางแพ',
+    // จ.สมุทรสงคราม (สังกัดเขต 1 ภาคใต้)
+    'กฟจ.สมุทรสงคราม',
+    'กฟส.อัมพวา',
+    'กฟส.บางคนที',
+  ];
+
+  // คำนวณรายชื่อแนะนำ: ขึ้นเป็นการไฟฟ้าในเขตพื้นที่ จ.ชุมพร เป็นหลัก หากครบแล้วให้ขึ้นแนะนำเป็นสังกัดเขต 1 ภาคใต้
+  const remainingChumphonBranches = CHUMPHON_BRANCH_SUGGESTIONS.filter(
+    (p) => !activePeaBranches.includes(p)
+  );
+  const remainingSouth1Branches = SOUTH_REGION_1_BRANCH_SUGGESTIONS.filter(
+    (p) => !activePeaBranches.includes(p)
+  );
+  const suggestedBranches =
+    remainingChumphonBranches.length > 0
+      ? remainingChumphonBranches
+      : remainingSouth1Branches;
 
   const handleAddNewBranch = async (e?: React.FormEvent, directName?: string) => {
     if (e) e.preventDefault();
@@ -1397,7 +1445,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                   type="text"
                   value={newBranchInput}
                   onChange={(e) => setNewBranchInput(e.target.value)}
-                  placeholder="พิมพ์ชื่อการไฟฟ้า เช่น กฟจ.ลำปาง, กฟจ.เชียงราย, กฟส.หางดง..."
+                  placeholder="พิมพ์ชื่อการไฟฟ้า เช่น กฟจ.ชุมพร, กฟส.หลังสวน, กฟส.ท่าแซะ, กฟส.สวี..."
                   className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 bg-slate-50 focus:bg-white transition-all"
                 />
               </div>
@@ -1417,26 +1465,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </form>
 
             {/* Quick Preset Suggestions */}
-            <div>
-              <p className="text-[11px] font-semibold text-slate-500 mb-2">
-                💡 คำแนะนำรายชื่อการไฟฟ้าทั่วไป (คลิกเพื่อเพิ่มทันที):
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {PRESET_BRANCH_SUGGESTIONS.filter((p) => !activePeaBranches.includes(p))
-                  .slice(0, 10)
-                  .map((preset) => (
+            {suggestedBranches.length > 0 && (
+              <div>
+                <p className="text-[11px] font-semibold text-slate-500 mb-2">
+                  💡 คำแนะนำรายชื่อการไฟฟ้าทั่วไป (คลิกเพื่อเพิ่มทันที):
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {suggestedBranches.map((branch) => (
                     <button
-                      key={preset}
+                      key={branch}
                       type="button"
-                      onClick={() => handleAddNewBranch(undefined, preset)}
+                      onClick={() => handleAddNewBranch(undefined, branch)}
                       className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 active:scale-95"
                     >
                       <Plus className="w-3 h-3 text-purple-500" />
-                      <span>{preset}</span>
+                      <span>{branch}</span>
                     </button>
                   ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* List and Search of Registered Branches */}
