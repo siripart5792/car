@@ -641,32 +641,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
             )}
           </div>
 
-          {/* Google Sheets Status in Dashboard */}
-          <div className="pt-4 mt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2 flex-wrap">
-              <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold text-[11px]">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>บันทึกข้อมูลเข้า Google Sheets อัตโนมัติ (ไม่ต้องกดซิงค์)</span>
-              </span>
+          {/* Google Sheets Link in Dashboard (for permitted admins) */}
+          {canOpenSpreadsheet && spreadsheetInfo?.url && (
+            <div className="pt-4 mt-4 border-t border-slate-100 flex justify-end text-xs">
+              <a
+                href={spreadsheetInfo.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all active:scale-98"
+                title="เปิดดูสเปรดชีต Google Sheets (เฉพาะผู้ดูแลระบบ)"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>เปิดดูสเปรดชีต Google Sheets</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
             </div>
-
-            <div className="flex items-center gap-2">
-              {canOpenSpreadsheet && spreadsheetInfo?.url && (
-                <a
-                  href={spreadsheetInfo.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all active:scale-98"
-                  title="เปิดดูสเปรดชีต Google Sheets (เฉพาะผู้ดูแลระบบ)"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>เปิดดูสเปรดชีต Google Sheets</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

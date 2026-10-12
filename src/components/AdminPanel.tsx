@@ -301,6 +301,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   // Sub-tabs inside Admin
   const [subTab, setSubTab] = useState<AdminSubTab>('vehicles');
 
+  // If user is supervisor, ensure they cannot access or stay on restricted tabs ('admin_users' or 'sheets_config')
+  useEffect(() => {
+    if (isSupervisor && (subTab === 'sheets_config' || subTab === 'admin_users')) {
+      setSubTab('vehicles');
+    }
+  }, [isSupervisor, subTab]);
+
   // --- Admin User Management Modal States ---
   const [adminUserModalOpen, setAdminUserModalOpen] = useState(false);
   const [editingAdminUser, setEditingAdminUser] = useState<AdminUser | null>(null);
@@ -894,18 +901,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             จัดการรายชื่อการไฟฟ้า ({activePeaBranches.length})
           </button>
 
-          {/* SubTab 6: Google Sheets Config */}
-          <button
-            onClick={() => setSubTab('sheets_config')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
-              subTab === 'sheets_config'
-                ? 'bg-emerald-700 text-white shadow-xs'
-                : 'text-emerald-800 hover:text-emerald-950 font-bold'
-            }`}
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
-            ตั้งค่า Google Sheets (4 แผ่นงาน)
-          </button>
+          {/* SubTab 6: Google Sheets Config (Hidden for Supervisor) */}
+          {!isSupervisor && (
+            <button
+              onClick={() => setSubTab('sheets_config')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                subTab === 'sheets_config'
+                  ? 'bg-emerald-700 text-white shadow-xs'
+                  : 'text-emerald-800 hover:text-emerald-950 font-bold'
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+              ตั้งค่า Google Sheets
+            </button>
+          )}
         </div>
       </div>
 
@@ -1559,6 +1568,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
       {/* SubTab 6: Google Sheets Config & Status */}
       {subTab === 'sheets_config' && (
+        isSupervisor ? (
+          <div className="bg-white p-8 sm:p-12 rounded-3xl border border-rose-200 shadow-xs text-center space-y-4 animate-in fade-in max-w-xl mx-auto my-8">
+            <div className="w-16 h-16 bg-rose-50 border border-rose-200 text-rose-600 rounded-2xl flex items-center justify-center mx-auto shadow-xs">
+              <ShieldAlert className="w-8 h-8" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">ไม่มีสิทธิ์เข้าถึงส่วนตั้งค่า Google Sheets</h3>
+              <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
+                ระดับสิทธิ์ <strong>หัวหน้างาน (Supervisor)</strong> ไม่สามารถดูหรือแก้ไขการตั้งค่า Google Sheets ได้ (สงวนสิทธิ์เฉพาะผู้ดูแลระบบหลัก Super Admin เท่านั้น)
+              </p>
+            </div>
+            <div>
+              <button
+                type="button"
+                onClick={() => setSubTab('vehicles')}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all active:scale-98 shadow-xs"
+              >
+                <Car className="w-4 h-4" />
+                <span>กลับสู่หน้ารายการยานพาหนะ</span>
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="space-y-6 animate-in fade-in">
           {/* Header Card */}
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1569,7 +1601,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="font-bold text-slate-900 text-base sm:text-lg">
-                    การเชื่อมโยง Google Sheets อัตโนมัติ (4 แผ่นงาน)
+                    การเชื่อมโยง Google Sheets อัตโนมัติ
                   </h3>
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -1953,6 +1985,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
         </div>
+        )
       )}
       {adminUserModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">

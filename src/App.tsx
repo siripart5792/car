@@ -877,11 +877,6 @@ export default function App() {
               </div>
             )}
 
-            <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-              <span>บันทึก Google Sheets อัตโนมัติ</span>
-            </div>
             <button
               onClick={() => handlePullFromSheets(false)}
               disabled={isFetchingFromSheets}
@@ -1085,9 +1080,6 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
             <span>ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน</span>
-          </div>
-          <div>
-            <span>มีหน้าผู้ดูแลระบบ (Admin) • ซิงค์ Google Sheets • ดูประวัติย้อนหลังทุกคัน</span>
           </div>
         </div>
       </footer>
