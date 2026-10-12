@@ -795,10 +795,7 @@ export default function App() {
             </div>
             <div>
               <span className="font-extrabold text-base sm:text-lg text-slate-900 leading-tight block">
-                ระบบตรวจเช็คสภาพยานพาหนะ
-              </span>
-              <span className="text-[11px] text-slate-500 hidden sm:block">
-                1. ยานพาหนะทั่วไป • 2. รถบรรทุกติดเครน • 3. รถกระเช้า Class C
+                ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน
               </span>
             </div>
           </div>
@@ -1087,7 +1084,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span>ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน (1. ยานพาหนะทั่วไป • 2. รถบรรทุกติดเครนไฮดรอลิค)</span>
+            <span>ระบบตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน</span>
           </div>
           <div>
             <span>มีหน้าผู้ดูแลระบบ (Admin) • ซิงค์ Google Sheets • ดูประวัติย้อนหลังทุกคัน</span>

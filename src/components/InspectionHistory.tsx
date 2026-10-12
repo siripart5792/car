@@ -75,8 +75,69 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
+  // Date filter state
+  const [datePreset, setDatePreset] = useState<string>('all');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+
   const [activeRecord, setActiveRecord] = useState<InspectionRecord | null>(null);
   const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null);
+
+  const formatYMD = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getRecordDateString = (dateStr: string) => {
+    if (!dateStr) return '';
+    try {
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) {
+        return formatYMD(d);
+      }
+    } catch {
+      // ignore
+    }
+    if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
+      return dateStr.substring(0, 10);
+    }
+    return '';
+  };
+
+  const handleDatePresetSelect = (preset: string) => {
+    setDatePreset(preset);
+    const now = new Date();
+    if (preset === 'all') {
+      setStartDate('');
+      setEndDate('');
+    } else if (preset === 'today') {
+      const todayStr = formatYMD(now);
+      setStartDate(todayStr);
+      setEndDate(todayStr);
+    } else if (preset === 'yesterday') {
+      const y = new Date();
+      y.setDate(y.getDate() - 1);
+      const yStr = formatYMD(y);
+      setStartDate(yStr);
+      setEndDate(yStr);
+    } else if (preset === 'last7') {
+      const past = new Date();
+      past.setDate(past.getDate() - 6);
+      setStartDate(formatYMD(past));
+      setEndDate(formatYMD(now));
+    } else if (preset === 'last30') {
+      const past = new Date();
+      past.setDate(past.getDate() - 29);
+      setStartDate(formatYMD(past));
+      setEndDate(formatYMD(now));
+    } else if (preset === 'this_month') {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      setStartDate(formatYMD(startOfMonth));
+      setEndDate(formatYMD(now));
+    }
+  };
 
   const availableBranches = Array.from(
     new Set([...(peaBranches || []), ...records.map((r) => r.peaBranch || 'กฟภ. สำนักงานใหญ่')])
@@ -99,7 +160,23 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
       rec.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (rec.workDescription && rec.workDescription.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    return matchesBranch && matchesVehicle && matchesCategory && matchesStatus && matchesSearch;
+    // Date filtering
+    let matchesDate = true;
+    if (startDate || endDate) {
+      const recDateStr = getRecordDateString(rec.inspectionDate);
+      if (recDateStr) {
+        if (startDate && recDateStr < startDate) {
+          matchesDate = false;
+        }
+        if (endDate && recDateStr > endDate) {
+          matchesDate = false;
+        }
+      } else {
+        matchesDate = false;
+      }
+    }
+
+    return matchesBranch && matchesVehicle && matchesCategory && matchesStatus && matchesSearch && matchesDate;
   });
 
   const deletingRecord = records.find((r) => r.id === deletingRecordId);
@@ -205,9 +282,104 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
           </div>
         </div>
 
-        {(searchTerm || selectedBranchFilter !== 'all' || selectedCategoryFilter !== 'all' || selectedVehicleFilter !== 'all' || selectedStatusFilter !== 'all') && (
-          <div className="flex items-center justify-between text-xs text-slate-500 pt-2 border-t border-slate-100">
-            <span>แสดง {filteredRecords.length} รายการ จากทั้งหมด {records.length} รายการ</span>
+        {/* Date Filter Controls */}
+        <div className="pt-3 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-slate-700 flex items-center gap-1.5 shrink-0">
+              <Calendar className="w-4 h-4 text-blue-600" />
+              กรองตามวันที่ตรวจ:
+            </span>
+
+            {/* Quick preset chips */}
+            <div className="flex flex-wrap items-center gap-1">
+              {[
+                { id: 'all', label: 'ทั้งหมด' },
+                { id: 'today', label: 'วันนี้' },
+                { id: 'yesterday', label: 'เมื่อวาน' },
+                { id: 'last7', label: '7 วันล่าสุด' },
+                { id: 'last30', label: '30 วันล่าสุด' },
+                { id: 'this_month', label: 'เดือนนี้' },
+              ].map((item) => {
+                const isActive =
+                  item.id === 'all'
+                    ? datePreset === 'all' && !startDate && !endDate
+                    : datePreset === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleDatePresetSelect(item.id)}
+                    className={`px-2.5 py-1 text-xs rounded-xl font-medium transition-all ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-xs font-semibold'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Custom Date Pickers */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 text-xs text-slate-600">
+              <span className="shrink-0 font-medium">ตั้งแต่</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setDatePreset('custom');
+                }}
+                className="px-2.5 py-1.5 bg-slate-50 hover:bg-white border border-slate-200 rounded-xl text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer"
+                title="เลือกวันที่เริ่มต้น"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-slate-600">
+              <span className="shrink-0 font-medium">ถึง</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setDatePreset('custom');
+                }}
+                className="px-2.5 py-1.5 bg-slate-50 hover:bg-white border border-slate-200 rounded-xl text-xs text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer"
+                title="เลือกวันที่สิ้นสุด"
+              />
+            </div>
+
+            {(startDate || endDate) && (
+              <button
+                type="button"
+                onClick={() => handleDatePresetSelect('all')}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-xl font-medium transition-colors"
+                title="ล้างตัวกรองวันที่"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>ล้างวันที่</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {(searchTerm || selectedBranchFilter !== 'all' || selectedCategoryFilter !== 'all' || selectedVehicleFilter !== 'all' || selectedStatusFilter !== 'all' || startDate || endDate || datePreset !== 'all') && (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 pt-3 border-t border-slate-100">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-slate-600">
+                แสดง <strong className="text-blue-600">{filteredRecords.length}</strong> รายการ จากทั้งหมด {records.length} รายการ
+              </span>
+              {(startDate || endDate) && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg font-medium text-xs">
+                  <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                  {startDate && endDate && startDate === endDate
+                    ? `วันที่ ${new Date(startDate + 'T00:00:00').toLocaleDateString('th-TH')}`
+                    : `${startDate ? new Date(startDate + 'T00:00:00').toLocaleDateString('th-TH') : 'เริ่มต้น'} - ${endDate ? new Date(endDate + 'T00:00:00').toLocaleDateString('th-TH') : 'ปัจจุบัน'}`}
+                </span>
+              )}
+            </div>
             <button
               onClick={() => {
                 setSearchTerm('');
@@ -215,10 +387,14 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
                 setSelectedCategoryFilter('all');
                 setSelectedVehicleFilter('all');
                 setSelectedStatusFilter('all');
+                setDatePreset('all');
+                setStartDate('');
+                setEndDate('');
               }}
-              className="text-blue-600 hover:underline font-medium"
+              className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline font-semibold"
             >
-              ล้างตัวกรอง
+              <X className="w-3.5 h-3.5" />
+              ล้างตัวกรองทั้งหมด
             </button>
           </div>
         )}
