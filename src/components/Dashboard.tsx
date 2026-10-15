@@ -73,9 +73,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const attentionVehicles = displayedVehicles.filter((v) => v.status === 'needs_attention');
   const maintenanceVehicles = displayedVehicles.filter((v) => v.status === 'maintenance');
 
-  const generalVehiclesCount = displayedVehicles.filter((v) => v.category === 'general').length;
-  const craneVehiclesCount = displayedVehicles.filter((v) => v.category === 'crane_truck').length;
-  const bucketVehiclesCount = displayedVehicles.filter((v) => v.category === 'bucket_truck_class_c').length;
 
   const readinessPercent = displayedVehicles.length
     ? Math.round((readyVehicles.length / displayedVehicles.length) * 100)
@@ -274,62 +271,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="absolute right-10 top-10 w-48 h-48 rounded-full bg-indigo-500/10 blur-2xl pointer-events-none" />
       </div>
 
-      {/* 3 Categories Breakdown Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Category 1: General */}
-        <div className="bg-blue-50/70 border border-blue-200/80 p-4 rounded-2xl flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold">
-              <Car className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="text-[11px] font-bold text-blue-800 uppercase tracking-wider block">ประเภทที่ 1</span>
-              <h4 className="font-bold text-slate-900 text-sm">ยานพาหนะทั่วไป</h4>
-              <p className="text-[11px] text-slate-500">กระบะ, ตู้, เก๋ง, ตรวจการ</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <span className="text-2xl font-black text-blue-700">{generalVehiclesCount}</span>
-            <span className="text-[10px] text-slate-500 block">คัน</span>
-          </div>
-        </div>
-
-        {/* Category 2: Hydraulic Crane Truck */}
-        <div className="bg-amber-50/70 border border-amber-200/80 p-4 rounded-2xl flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center font-bold">
-              <Wrench className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="text-[11px] font-bold text-amber-800 uppercase tracking-wider block">ประเภทที่ 2</span>
-              <h4 className="font-bold text-slate-900 text-sm">รถบรรทุกติดเครน</h4>
-              <p className="text-[11px] text-slate-500">ขาค้ำยัน, บูมเครน, สลิง, Overload</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <span className="text-2xl font-black text-amber-700">{craneVehiclesCount}</span>
-            <span className="text-[10px] text-slate-500 block">คัน</span>
-          </div>
-        </div>
-
-        {/* Category 3: Class C Bucket Truck */}
-        <div className="bg-purple-50/70 border border-purple-200/80 p-4 rounded-2xl flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold">
-              <Zap className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="text-[11px] font-bold text-purple-800 uppercase tracking-wider block">ประเภทที่ 3</span>
-              <h4 className="font-bold text-slate-900 text-sm">รถกระเช้า Class C</h4>
-              <p className="text-[11px] text-slate-500">ฉนวนไฟฟ้า, ฮอทไลน์ 22-33kV</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <span className="text-2xl font-black text-purple-700">{bucketVehiclesCount}</span>
-            <span className="text-[10px] text-slate-500 block">คัน</span>
-          </div>
-        </div>
-      </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
