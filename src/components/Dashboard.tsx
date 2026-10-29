@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Car, 
   CheckCircle2, 
@@ -17,7 +17,12 @@ import {
   AlertCircle,
   ExternalLink,
   Building,
-  PauseCircle 
+  PauseCircle,
+  ChevronDown,
+  CheckSquare,
+  Square,
+  X,
+  Filter
 } from 'lucide-react';
 import { Vehicle, InspectionRecord } from '../types/vehicle';
 import { SpreadsheetInfo } from '../services/googleSheets';
@@ -49,7 +54,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onOpenSheets,
 }) => {
   const [copiedDailyAlert, setCopiedDailyAlert] = useState(false);
-  const [selectedBranch, setSelectedBranch] = useState<string>('all');
+  const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
+  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
+  const branchDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (branchDropdownRef.current && !branchDropdownRef.current.contains(event.target as Node)) {
+        setIsBranchDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   // Available PEA branches
   const availableBranches = Array.from(
@@ -59,16 +79,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
     ])
   );
 
-  // Filter fleet based on selected branch
-  const displayedVehicles =
-    selectedBranch === 'all'
-      ? vehicles
-      : vehicles.filter((v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === selectedBranch);
+  const isAllSelected = selectedBranches.length === 0;
 
-  const displayedInspections =
-    selectedBranch === 'all'
-      ? inspections
-      : inspections.filter((i) => (i.peaBranch || 'กฟภ. สำนักงานใหญ่') === selectedBranch);
+  // Toggle selection for a specific branch
+  const handleToggleBranch = (branch: string) => {
+    if (selectedBranches.includes(branch)) {
+      const next = selectedBranches.filter((b) => b !== branch);
+      setSelectedBranches(next);
+    } else {
+      const next = [...selectedBranches, branch];
+      setSelectedBranches(next);
+    }
+  };
+
+  const handleSelectAll = () => {
+    setSelectedBranches([]);
+  };
+
+  // Filter fleet based on selected branch
+  const displayedVehicles = isAllSelected
+    ? vehicles
+    : vehicles.filter((v) => selectedBranches.includes(v.peaBranch || 'กฟภ. สำนักงานใหญ่'));
+
+  const displayedInspections = isAllSelected
+    ? inspections
+    : inspections.filter((i) => selectedBranches.includes(i.peaBranch || 'กฟภ. สำนักงานใหญ่'));
 
   const readyVehicles = displayedVehicles.filter((v) => v.status === 'ready');
   const attentionVehicles = displayedVehicles.filter((v) => v.status === 'needs_attention');
@@ -109,7 +144,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Handler to copy the daily uninspected list for LINE or dispatcher sharing
   const handleCopyPendingList = () => {
     if (pendingVehiclesToday.length === 0) return;
-    const branchTitle = selectedBranch === 'all' ? 'ทุกการไฟฟ้า' : selectedBranch;
+    const branchTitle = isAllSelected
+      ? 'ทุกการไฟฟ้า'
+      : selectedBranches.length === 1
+      ? selectedBranches[0]
+      : `${selectedBranches.join(', ')} (${selectedBranches.length} การไฟฟ้า)`;
     const textLines = [
       `📢 สรุปรายชื่อยานพาหนะที่ "ยังไม่ได้ตรวจสภาพก่อนปฏิบัติงาน" ประจำวัน (${branchTitle}):`,
       `📅 วันที่: ${formattedTodayDate}`,
@@ -136,42 +175,216 @@ export const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div className="space-y-6">
       {/* PEA Branch Filter Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
-            <Building className="w-4 h-4 text-indigo-600" />
-            <span>เลือกการไฟฟ้าที่สังกัด:</span>
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col gap-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+              <Building className="w-4 h-4 text-indigo-600" />
+              <span>เลือกการไฟฟ้าที่สังกัด:</span>
+            </div>
+
+            {/* Custom Multi-Select Dropdown Popover */}
+            <div className="relative" ref={branchDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
+                className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-indigo-50/90 hover:bg-indigo-100/90 border border-indigo-200 text-indigo-950 font-bold rounded-xl text-xs transition-all shadow-2xs focus:ring-2 focus:ring-indigo-500/20 active:scale-98"
+                aria-expanded={isBranchDropdownOpen}
+              >
+                <span className="flex items-center gap-1.5">
+                  {isAllSelected ? (
+                    <>
+                      <span>⚡ ทุกการไฟฟ้าทั้งหมด</span>
+                      <span className="px-1.5 py-0.2 rounded-md bg-indigo-200/70 text-indigo-900 text-[10px] font-extrabold">
+                        {vehicles.length} คัน
+                      </span>
+                    </>
+                  ) : selectedBranches.length === 1 ? (
+                    <>
+                      <span className="truncate max-w-[180px]">⚡ {selectedBranches[0]}</span>
+                      <span className="px-1.5 py-0.2 rounded-md bg-indigo-600 text-white text-[10px] font-extrabold">
+                        {displayedVehicles.length} คัน
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span>⚡ เลือก {selectedBranches.length} การไฟฟ้า</span>
+                      <span className="px-1.5 py-0.2 rounded-md bg-indigo-600 text-white text-[10px] font-extrabold">
+                        {displayedVehicles.length} คัน
+                      </span>
+                    </>
+                  )}
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 text-indigo-600 transition-transform ${isBranchDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* Native multiple select for standard selector compatibility */}
+              <select
+                multiple
+                value={selectedBranches}
+                onChange={(e) => {
+                  const selected = Array.from(e.target.selectedOptions, (opt) => opt.value);
+                  setSelectedBranches(selected.filter((x) => x !== 'all'));
+                }}
+                className="sr-only"
+                aria-label="เลือกการไฟฟ้า (เลือกได้หลายแห่ง)"
+              >
+                <option value="all">ทุกการไฟฟ้า</option>
+                {availableBranches.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+
+              {/* Dropdown Menu */}
+              {isBranchDropdownOpen && (
+                <div className="absolute left-0 mt-1.5 w-72 sm:w-80 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 p-2 animate-in fade-in-50 zoom-in-95 duration-100">
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 px-1">
+                    <span className="text-[11px] font-bold text-slate-700">
+                      รายชื่อการไฟฟ้า (เลือกได้มากกว่า 1 แห่ง)
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={handleSelectAll}
+                        className={`text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all ${
+                          isAllSelected
+                            ? 'bg-indigo-600 text-white shadow-2xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        ทั้งหมด
+                      </button>
+                      {!isAllSelected && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedBranches([])}
+                          className="text-[10px] px-2 py-0.5 rounded-lg font-bold bg-rose-50 text-rose-600 hover:bg-rose-100"
+                        >
+                          ล้างค่า
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="max-h-60 overflow-y-auto space-y-1 pr-1">
+                    {/* All option */}
+                    <button
+                      type="button"
+                      onClick={handleSelectAll}
+                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-colors text-left ${
+                        isAllSelected
+                          ? 'bg-indigo-50 text-indigo-950 font-bold border border-indigo-200'
+                          : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {isAllSelected ? (
+                          <CheckSquare className="w-4 h-4 text-indigo-600 shrink-0" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-400 shrink-0" />
+                        )}
+                        <span>⚡ แสดงทุกการไฟฟ้าทั้งหมด</span>
+                      </div>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-bold">
+                        {vehicles.length} คัน
+                      </span>
+                    </button>
+
+                    <div className="h-px bg-slate-100 my-1" />
+
+                    {/* Individual Branches */}
+                    {availableBranches.map((b) => {
+                      const count = vehicles.filter((v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === b).length;
+                      const isChecked = selectedBranches.includes(b);
+                      return (
+                        <button
+                          key={b}
+                          type="button"
+                          onClick={() => handleToggleBranch(b)}
+                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-medium transition-colors text-left ${
+                            isChecked
+                              ? 'bg-indigo-50/80 text-indigo-950 font-bold border border-indigo-200/80'
+                              : 'hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            {isChecked ? (
+                              <CheckSquare className="w-4 h-4 text-indigo-600 shrink-0" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-300 shrink-0" />
+                            )}
+                            <span className="truncate">{b}</span>
+                          </div>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold shrink-0 ml-1">
+                            {count} คัน
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="pt-2 mt-2 border-t border-slate-100 px-1 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>เลือก {isAllSelected ? 'ทั้งหมด' : `${selectedBranches.length} แห่ง`}</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsBranchDropdownOpen(false)}
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-800"
+                    >
+                      ตกลง
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-          <select
-            value={selectedBranch}
-            onChange={(e) => setSelectedBranch(e.target.value)}
-            className="px-3 py-1.5 bg-indigo-50/80 border border-indigo-200 text-indigo-950 font-bold rounded-xl text-xs focus:ring-2 focus:ring-indigo-500/20"
-          >
-            <option value="all">⚡ ทุกการไฟฟ้าทั้งหมด ({vehicles.length} คัน)</option>
-            {availableBranches.map((b) => {
-              const count = vehicles.filter((v) => (v.peaBranch || 'กฟภ. สำนักงานใหญ่') === b).length;
-              return (
-                <option key={b} value={b}>
-                  {b} ({count} คัน)
-                </option>
-              );
-            })}
-          </select>
+
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-slate-500">
+              แสดงยานพาหนะ: <strong className="text-slate-900 font-bold">{displayedVehicles.length}</strong> จาก {vehicles.length} คัน
+            </span>
+            {!isAllSelected && (
+              <button
+                type="button"
+                onClick={handleSelectAll}
+                className="text-xs text-blue-600 font-semibold hover:underline"
+              >
+                ดูทุกการไฟฟ้า
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-slate-500">
-            แสดงยานพาหนะ: <strong className="text-slate-900 font-bold">{displayedVehicles.length}</strong> คัน
-          </span>
-          {selectedBranch !== 'all' && (
+        {/* Selected branch chips / tags */}
+        {!isAllSelected && (
+          <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-slate-100">
+            <span className="text-[11px] text-slate-500 font-semibold">การไฟฟ้าที่เลือก ({selectedBranches.length}):</span>
+            {selectedBranches.map((b) => (
+              <span
+                key={b}
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-indigo-100 text-indigo-900 text-xs font-semibold shadow-2xs"
+              >
+                <span>{b}</span>
+                <button
+                  type="button"
+                  onClick={() => handleToggleBranch(b)}
+                  className="hover:text-rose-600 transition-colors p-0.5 rounded-full hover:bg-indigo-200"
+                  title={`นำ ${b} ออกจากตัวกรอง`}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
             <button
-              onClick={() => setSelectedBranch('all')}
-              className="text-xs text-blue-600 font-semibold hover:underline"
+              type="button"
+              onClick={handleSelectAll}
+              className="text-[11px] text-rose-600 hover:text-rose-700 font-bold hover:underline ml-1"
             >
-              ดูทุกการไฟฟ้า
+              ล้างทั้งหมด
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
       {/* Daily Audit Notification Banner */}
       {pendingVehiclesToday.length > 0 ? (
