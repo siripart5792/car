@@ -516,6 +516,10 @@ export default function App() {
     let newVehicleStatus: VehicleStatus = 'ready';
     if (newRecord.overallStatus === 'conditional') newVehicleStatus = 'needs_attention';
     if (newRecord.overallStatus === 'not_ready') newVehicleStatus = 'maintenance';
+    if (newRecord.overallStatus === 'not_used') {
+      const existingVehicle = vehicles.find((v) => v.id === newRecord.vehicleId);
+      newVehicleStatus = existingVehicle?.status || 'ready';
+    }
 
     const updatedVehicles = vehicles.map((v) => {
       if (v.id === newRecord.vehicleId) {

@@ -16,7 +16,8 @@ import {
   BellRing, 
   AlertCircle,
   ExternalLink,
-  Building 
+  Building,
+  PauseCircle 
 } from 'lucide-react';
 import { Vehicle, InspectionRecord } from '../types/vehicle';
 import { SpreadsheetInfo } from '../services/googleSheets';
@@ -526,11 +527,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               ? 'bg-emerald-100 text-emerald-700'
                               : rec.overallStatus === 'conditional'
                               ? 'bg-amber-100 text-amber-700'
+                              : rec.overallStatus === 'not_used'
+                              ? 'bg-slate-100 text-slate-700'
                               : 'bg-rose-100 text-rose-700'
                           }`}
                         >
                           {rec.overallStatus === 'ready' ? (
                             <CheckCircle2 className="w-5 h-5" />
+                          ) : rec.overallStatus === 'not_used' ? (
+                            <PauseCircle className="w-5 h-5 text-slate-600" />
                           ) : (
                             <AlertTriangle className="w-5 h-5" />
                           )}
@@ -561,6 +566,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               ? 'bg-emerald-50 text-emerald-700'
                               : rec.overallStatus === 'conditional'
                               ? 'bg-amber-50 text-amber-700'
+                              : rec.overallStatus === 'not_used'
+                              ? 'bg-slate-100 text-slate-700'
                               : 'bg-rose-50 text-rose-700'
                           }`}
                         >
@@ -568,6 +575,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             ? 'ผ่าน'
                             : rec.overallStatus === 'conditional'
                             ? 'มีข้อสังเกต'
+                            : rec.overallStatus === 'not_used'
+                            ? 'ไม่มีการใช้งาน'
                             : 'ห้ามใช้'}
                         </span>
                         <div className="text-[10px] text-slate-400 mt-1">

@@ -14,7 +14,9 @@ import {
   Wrench,
   Layers,
   Zap,
-  ExternalLink
+  ExternalLink,
+  PauseCircle,
+  Clock
 } from 'lucide-react';
 import { 
   Vehicle, 
@@ -66,6 +68,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
   const [workDescription, setWorkDescription] = useState<string>('');
   const [overallStatus, setOverallStatus] = useState<OverallStatus>('ready');
   const [summaryRemarks, setSummaryRemarks] = useState<string>('');
+  const [isNotInUseToday, setIsNotInUseToday] = useState(false);
 
   const vehicleSelectId = useId();
   const odometerInputId = useId();
@@ -164,6 +167,10 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
 
   // Auto-suggest overall status when failCount changes
   useEffect(() => {
+    if (isNotInUseToday) {
+      setOverallStatus('not_used');
+      return;
+    }
     if (failCount === 0) {
       setOverallStatus('ready');
     } else if (failCount <= 2) {
@@ -171,13 +178,16 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
     } else {
       setOverallStatus('not_ready');
     }
-  }, [failCount]);
+  }, [failCount, isNotInUseToday]);
 
   const executeSaveInspection = async () => {
     if (!selectedVehicle) return;
     setIsSubmitting(true);
     setFormError('');
     try {
+      const itemsToSave = isNotInUseToday ? [] : items;
+      const finalStatus: OverallStatus = isNotInUseToday ? 'not_used' : overallStatus;
+
       await onSaveInspection({
         vehicleId: selectedVehicle.id,
         vehicleLicensePlate: selectedVehicle.licensePlate,
@@ -188,13 +198,17 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
         model: selectedVehicle.model,
         department: selectedVehicle.department,
         inspectionDate: new Date().toISOString(),
-        odometer: Number(odometer) || 0,
+        odometer: Number(odometer) || (selectedVehicle.lastOdometer || 0),
         inspectorName: inspectorName.trim(),
         inspectorPhone: inspectorPhone.trim(),
-        workDescription: workDescription.trim(),
-        items,
-        overallStatus,
-        summaryRemarks: summaryRemarks.trim(),
+        workDescription: isNotInUseToday
+          ? (workDescription.trim() || 'ไม่มีการใช้งานในวันนี้ (จอดประจำการ)')
+          : workDescription.trim(),
+        items: itemsToSave,
+        overallStatus: finalStatus,
+        summaryRemarks: isNotInUseToday
+          ? (summaryRemarks.trim() || 'ไม่มีการใช้งานในวันนี้')
+          : summaryRemarks.trim(),
         syncedToSheets: isSheetsConnected,
       });
 
@@ -215,11 +229,11 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
       return;
     }
     if (!inspectorName.trim()) {
-      setFormError('กรุณาระบุชื่อผู้ตรวจสอบ / พนักงานขับรถ');
+      setFormError(isNotInUseToday ? 'กรุณาระบุชื่อผู้รายงาน / พนักงานขับรถ' : 'กรุณาระบุชื่อผู้ตรวจสอบ / พนักงานขับรถ');
       return;
     }
 
-    if (odometer < selectedVehicle.lastOdometer) {
+    if (!isNotInUseToday && odometer < selectedVehicle.lastOdometer) {
       setShowOdoConfirm(true);
       return;
     }
@@ -230,18 +244,29 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
   // Reset form for new inspection
   const handleResetForNew = () => {
     setSubmittedRecordId(null);
+    setIsNotInUseToday(false);
     handleMarkAllPass();
     setSummaryRemarks('');
     setWorkDescription('');
   };
 
   if (submittedRecordId && selectedVehicle) {
+    const isNotUsed = overallStatus === 'not_used';
+
     return (
       <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center max-w-2xl mx-auto shadow-sm animate-in zoom-in-95 duration-200">
-        <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-          <ShieldCheck className="w-10 h-10" />
+        <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 ${
+          isNotUsed ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-600'
+        }`}>
+          {isNotUsed ? (
+            <PauseCircle className="w-10 h-10" />
+          ) : (
+            <ShieldCheck className="w-10 h-10" />
+          )}
         </div>
-        <h2 className="text-2xl font-bold text-slate-900">บันทึกผลการตรวจสภาพเรียบร้อยแล้ว</h2>
+        <h2 className="text-2xl font-bold text-slate-900">
+          {isNotUsed ? 'บันทึกข้อมูลเรียบร้อยแล้ว' : 'บันทึกผลการตรวจสภาพเรียบร้อยแล้ว'}
+        </h2>
         <p className="text-slate-600 mt-2 text-sm">
           ยานพาหนะทะเบียน <span className="font-bold text-slate-800">{selectedVehicle.licensePlate}</span> ({selectedVehicle.brand} {selectedVehicle.model})
         </p>
@@ -268,8 +293,22 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
         <div className="mt-6 p-4 bg-slate-50 rounded-2xl border border-slate-100 grid grid-cols-3 gap-3 text-center">
           <div className="p-2">
             <span className="text-xs text-slate-500 block">ผลการตรวจ</span>
-            <span className={`text-sm font-bold ${overallStatus === 'ready' ? 'text-emerald-600' : overallStatus === 'conditional' ? 'text-amber-600' : 'text-rose-600'}`}>
-              {overallStatus === 'ready' ? '🟢 พร้อมใช้งาน' : overallStatus === 'conditional' ? '🟡 มีข้อสังเกต' : '🔴 ห้ามปฏิบัติงาน'}
+            <span className={`text-sm font-bold ${
+              overallStatus === 'ready'
+                ? 'text-emerald-600'
+                : overallStatus === 'conditional'
+                ? 'text-amber-600'
+                : overallStatus === 'not_used'
+                ? 'text-slate-600'
+                : 'text-rose-600'
+            }`}>
+              {overallStatus === 'ready'
+                ? '🟢 พร้อมใช้งาน'
+                : overallStatus === 'conditional'
+                ? '🟡 มีข้อสังเกต'
+                : overallStatus === 'not_used'
+                ? '⚪ ไม่มีการใช้งาน'
+                : '🔴 ห้ามปฏิบัติงาน'}
             </span>
           </div>
           <div className="p-2 border-x border-slate-200">
@@ -345,33 +384,82 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
     <form onSubmit={handleSubmit} className="space-y-6 max-w-4xl mx-auto">
       {/* Top Banner / Selection */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-          <div>
-            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <ClipboardCheck className="w-6 h-6 text-blue-600" />
-              แบบฟอร์มตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              ระบบสลับรายการตรวจเช็คอัตโนมัติตามประเภทรถ (1. ยานพาหนะทั่วไป / 2. รถบรรทุกติดเครนไฮดรอลิค)
-            </p>
-          </div>
+        {/* Inspection Mode Tabs */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-1.5 bg-slate-100 rounded-2xl border border-slate-200/80">
+          <button
+            type="button"
+            onClick={() => {
+              setIsNotInUseToday(false);
+              setOverallStatus(failCount > 0 ? 'conditional' : 'ready');
+            }}
+            className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+              !isNotInUseToday
+                ? 'bg-white text-blue-700 shadow-xs border border-blue-200/60'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <ClipboardCheck className="w-4 h-4 text-blue-600 shrink-0" />
+            <span>ตรวจเช็คสภาพยานพาหนะ (มีการปฏิบัติงาน)</span>
+          </button>
 
           <button
             type="button"
-            onClick={handleMarkAllPass}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold transition-all self-start sm:self-auto"
-            title="ตั้งค่าทุกข้อเป็น ผ่าน (ปกติ)"
+            onClick={() => {
+              setIsNotInUseToday(true);
+              setOverallStatus('not_used');
+              if (selectedVehicle) {
+                setOdometer(selectedVehicle.lastOdometer);
+              }
+            }}
+            className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+              isNotInUseToday
+                ? 'bg-white text-slate-800 shadow-xs border border-slate-300'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
           >
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-            ผ่านทั้งหมด (Fast Pass)
+            <PauseCircle className="w-4 h-4 text-slate-600 shrink-0" />
+            <span className="flex items-center gap-1.5">
+              <span>ไม่มีการใช้งานในวันนี้</span>
+              <span className="text-[11px] font-normal text-slate-500">(ไม่ต้องตรวจสภาพรถ)</span>
+            </span>
           </button>
+        </div>
+
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              {isNotInUseToday ? (
+                <>
+                  <PauseCircle className="w-6 h-6 text-slate-600" />
+                  <span>บันทึกสถานะ: ไม่มีการใช้งานในวันนี้</span>
+                </>
+              ) : (
+                <>
+                  <ClipboardCheck className="w-6 h-6 text-blue-600" />
+                  <span>แบบฟอร์มตรวจเช็คสภาพยานพาหนะก่อนปฏิบัติงาน</span>
+                </>
+              )}
+            </h2>
+          </div>
+
+          {!isNotInUseToday && (
+            <button
+              type="button"
+              onClick={handleMarkAllPass}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold transition-all self-start sm:self-auto"
+              title="ตั้งค่าทุกข้อเป็น ผ่าน (ปกติ)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              ผ่านทั้งหมด (Fast Pass)
+            </button>
+          )}
         </div>
 
         {/* Vehicle Selection & Metadata */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
           <div>
             <label htmlFor={vehicleSelectId} className="block text-xs font-semibold text-slate-700 mb-1">
-              เลือกยานพาหนะที่ต้องการตรวจ <span className="text-red-500">*</span>
+              เลือกยานพาหนะ <span className="text-red-500">*</span>
             </label>
             <select
               id={vehicleSelectId}
@@ -400,7 +488,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
 
           <div>
             <label htmlFor={odometerInputId} className="block text-xs font-semibold text-slate-700 mb-1">
-              เลขไมล์ก่อนออกปฏิบัติงาน (กม.) <span className="text-red-500">*</span>
+              {isNotInUseToday ? 'เลขไมล์ปัจจุบัน (กม.)' : 'เลขไมล์ก่อนออกปฏิบัติงาน (กม.)'} <span className="text-red-500">*</span>
             </label>
             <input
               id={odometerInputId}
@@ -413,14 +501,14 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
             />
             {selectedVehicle && (
               <span className="text-[11px] text-slate-500 mt-1 block">
-                เลขไมล์ครั้งก่อน: {selectedVehicle.lastOdometer.toLocaleString()} กม.
+                {isNotInUseToday ? 'เลขไมล์คงค้างล่าสุด: ' : 'เลขไมล์ครั้งก่อน: '}{selectedVehicle.lastOdometer.toLocaleString()} กม.
               </span>
             )}
           </div>
 
           <div>
             <label htmlFor={inspectorNameInputId} className="block text-xs font-semibold text-slate-700 mb-1">
-              ชื่อผู้ตรวจสอบ / พนักงานขับรถ <span className="text-red-500">*</span>
+              {isNotInUseToday ? 'ชื่อผู้บันทึกข้อมูล / พนักงานขับรถ' : 'ชื่อผู้ตรวจสอบ / พนักงานขับรถ'} <span className="text-red-500">*</span>
             </label>
             <input
               id={inspectorNameInputId}
@@ -450,12 +538,12 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
           </div>
           <div>
             <label htmlFor={workDescriptionInputId} className="block text-xs font-semibold text-slate-700 mb-1">
-              ลักษณะงาน / ภารกิจที่ปฏิบัติ
+              {isNotInUseToday ? 'หมายเหตุ / เหตุผลที่ไม่มีการใช้งาน (ถ้ามี)' : 'ลักษณะงาน / ภารกิจที่ปฏิบัติ'}
             </label>
             <input
               id={workDescriptionInputId}
               type="text"
-              placeholder="เช่น ออกตรวจแก้กระแสไฟฟ้าขัดข้อง, งานยกหม้อแปลง/ปักเสา"
+              placeholder={isNotInUseToday ? 'เช่น จอดประจำการที่สำนักงาน, วันหยุดประจำสัปดาห์, ไม่มีภารกิจ' : 'เช่น ออกตรวจแก้กระแสไฟฟ้าขัดข้อง, งานยกหม้อแปลง/ปักเสา'}
               value={workDescription}
               onChange={(e) => setWorkDescription(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
@@ -463,43 +551,78 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
           </div>
         </div>
 
-        {/* Applied Checklist Type Notice */}
-        <div
-          className={`p-3.5 rounded-xl border flex items-center justify-between text-xs ${
-            activeCategory === 'bucket_truck_class_c'
-              ? 'bg-purple-50/80 border-purple-200 text-purple-900'
-              : activeCategory === 'crane_truck'
-              ? 'bg-amber-50/70 border-amber-200 text-amber-900'
-              : 'bg-blue-50/70 border-blue-200 text-blue-900'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            {activeCategory === 'bucket_truck_class_c' ? (
-              <Zap className="w-4 h-4 text-purple-600 shrink-0" />
-            ) : activeCategory === 'crane_truck' ? (
-              <Wrench className="w-4 h-4 text-amber-600 shrink-0" />
-            ) : (
-              <Car className="w-4 h-4 text-blue-600 shrink-0" />
-            )}
-            <span>
-              กำลังใช้ชุดรายการตรวจ: <strong>{
-                activeCategory === 'bucket_truck_class_c'
-                  ? '3. รถกระเช้า Class C (ฮอทไลน์ / ฉนวนไฟฟ้า)'
-                  : activeCategory === 'crane_truck'
-                  ? '2. รถบรรทุกติดเครนไฮดรอลิค'
-                  : '1. ยานพาหนะทั่วไป'
-              }</strong> (รวม {items.length} รายการตรวจ)
+        {/* Applied Checklist Type Notice or Idle Notice */}
+        {isNotInUseToday ? (
+          <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <PauseCircle className="w-4 h-4 text-slate-600 shrink-0" />
+              <span>
+                สถานะ: <strong>ไม่มีการใช้งานในวันนี้ (จอดประจำการ)</strong> — ยกเว้นการตรวจสภาพตามรายการ
+              </span>
+            </div>
+            <span className="text-[11px] font-mono text-slate-500 hidden sm:inline">
+              ไม่ต้องตรวจ {items.length} รายการ
             </span>
           </div>
+        ) : (
+          <div
+            className={`p-3.5 rounded-xl border flex items-center justify-between text-xs ${
+              activeCategory === 'bucket_truck_class_c'
+                ? 'bg-purple-50/80 border-purple-200 text-purple-900'
+                : activeCategory === 'crane_truck'
+                ? 'bg-amber-50/70 border-amber-200 text-amber-900'
+                : 'bg-blue-50/70 border-blue-200 text-blue-900'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {activeCategory === 'bucket_truck_class_c' ? (
+                <Zap className="w-4 h-4 text-purple-600 shrink-0" />
+              ) : activeCategory === 'crane_truck' ? (
+                <Wrench className="w-4 h-4 text-amber-600 shrink-0" />
+              ) : (
+                <Car className="w-4 h-4 text-blue-600 shrink-0" />
+              )}
+              <span>
+                กำลังใช้ชุดรายการตรวจ: <strong>{
+                  activeCategory === 'bucket_truck_class_c'
+                    ? '3. รถกระเช้า Class C (ฮอทไลน์ / ฉนวนไฟฟ้า)'
+                    : activeCategory === 'crane_truck'
+                    ? '2. รถบรรทุกติดเครนไฮดรอลิค'
+                    : '1. ยานพาหนะทั่วไป'
+                }</strong> (รวม {items.length} รายการตรวจ)
+              </span>
+            </div>
 
-          <span className="text-[11px] font-mono text-slate-500 hidden sm:inline">
-            {activeTemplateCategories.length} หมวดหมู่
-          </span>
-        </div>
+            <span className="text-[11px] font-mono text-slate-500 hidden sm:inline">
+              {activeTemplateCategories.length} หมวดหมู่
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* Progress & Summary Bar */}
-      <div className="sticky top-2 z-20 bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-lg border border-slate-800 flex items-center justify-between gap-4">
+      {isNotInUseToday ? (
+        <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-4 shadow-xs">
+          <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center mx-auto border border-slate-200">
+            <PauseCircle className="w-8 h-8" />
+          </div>
+          <div className="max-w-md mx-auto space-y-1">
+            <h3 className="text-lg font-bold text-slate-900">
+              ไม่มีการใช้งานยานพาหนะในวันนี้
+            </h3>
+            <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
+              ยานพาหนะคันนี้จอดประจำการ / ไม่มีภารกิจนำออกปฏิบัติงาน<br />
+              <span className="text-slate-700 font-semibold">ไม่ต้องทำการตรวจเช็คสภาพรถ</span> ระบบจะบันทึกผลเป็น <span className="font-bold text-slate-800">"ไม่มีการใช้งานในวันนี้"</span> เพื่อเป็นหลักฐานประจำวัน
+            </p>
+          </div>
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600">
+            <Clock className="w-4 h-4 text-slate-400" />
+            <span>วันที่บันทึก: {new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Progress & Summary Bar */}
+          <div className="sticky top-2 z-20 bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-lg border border-slate-800 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -645,100 +768,120 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
             </div>
           );
         })}
-      </div>
+          </div>
+        </>
+      )}
 
       {/* Overall Safety Evaluation */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
         <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-          <ShieldCheck className="w-5 h-5 text-blue-600" />
-          การประเมินผลความพร้อมของยานพาหนะก่อนออกปฏิบัติงาน
+          {isNotInUseToday ? (
+            <PauseCircle className="w-5 h-5 text-slate-600" />
+          ) : (
+            <ShieldCheck className="w-5 h-5 text-blue-600" />
+          )}
+          {isNotInUseToday ? 'สถานะความพร้อมของยานพาหนะ' : 'การประเมินผลความพร้อมของยานพาหนะก่อนออกปฏิบัติงาน'}
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* Ready */}
-          <label
-            className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col items-center text-center ${
-              overallStatus === 'ready'
-                ? 'border-emerald-500 bg-emerald-50/70 text-emerald-900 shadow-xs'
-                : 'border-slate-200 hover:border-slate-300 text-slate-700'
-            }`}
-          >
-            <input
-              type="radio"
-              name="overallStatus"
-              value="ready"
-              checked={overallStatus === 'ready'}
-              onChange={() => setOverallStatus('ready')}
-              className="sr-only"
-            />
-            <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-2">
-              <CheckCircle2 className="w-6 h-6" />
+        {isNotInUseToday ? (
+          <div className="p-4 rounded-2xl border-2 border-slate-300 bg-slate-50/80 flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center shrink-0">
+              <PauseCircle className="w-6 h-6" />
             </div>
-            <span className="font-bold text-sm">พร้อมใช้งาน (Pass)</span>
-            <span className="text-xs text-slate-500 mt-1">
-              สภาพสมบูรณ์ ปลอดภัยตามมาตรฐานทุกประการ
-            </span>
-          </label>
+            <div>
+              <span className="font-bold text-sm text-slate-900 block">⚪ ไม่มีการใช้งานในวันนี้ (จอดประจำการ)</span>
+              <span className="text-xs text-slate-500">
+                ยานพาหนะจอดสแตนด์บาย ไม่ได้นำออกปฏิบัติงาน ได้รับการยกเว้นการตรวจสภาพประจำวัน
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* Ready */}
+            <label
+              className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col items-center text-center ${
+                overallStatus === 'ready'
+                  ? 'border-emerald-500 bg-emerald-50/70 text-emerald-900 shadow-xs'
+                  : 'border-slate-200 hover:border-slate-300 text-slate-700'
+              }`}
+            >
+              <input
+                type="radio"
+                name="overallStatus"
+                value="ready"
+                checked={overallStatus === 'ready'}
+                onChange={() => setOverallStatus('ready')}
+                className="sr-only"
+              />
+              <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-2">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <span className="font-bold text-sm">พร้อมใช้งาน (Pass)</span>
+              <span className="text-xs text-slate-500 mt-1">
+                สภาพสมบูรณ์ ปลอดภัยตามมาตรฐานทุกประการ
+              </span>
+            </label>
 
-          {/* Conditional */}
-          <label
-            className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col items-center text-center ${
-              overallStatus === 'conditional'
-                ? 'border-amber-500 bg-amber-50/70 text-amber-900 shadow-xs'
-                : 'border-slate-200 hover:border-slate-300 text-slate-700'
-            }`}
-          >
-            <input
-              type="radio"
-              name="overallStatus"
-              value="conditional"
-              checked={overallStatus === 'conditional'}
-              onChange={() => setOverallStatus('conditional')}
-              className="sr-only"
-            />
-            <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mb-2">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <span className="font-bold text-sm">พร้อมใช้งานแบบมีข้อสังเกต</span>
-            <span className="text-xs text-slate-500 mt-1">
-              ใช้งานได้ชั่วคราว มีจุดต้องเฝ้าระวังหรือสั่งซ่อมในวัน
-            </span>
-          </label>
+            {/* Conditional */}
+            <label
+              className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col items-center text-center ${
+                overallStatus === 'conditional'
+                  ? 'border-amber-500 bg-amber-50/70 text-amber-900 shadow-xs'
+                  : 'border-slate-200 hover:border-slate-300 text-slate-700'
+              }`}
+            >
+              <input
+                type="radio"
+                name="overallStatus"
+                value="conditional"
+                checked={overallStatus === 'conditional'}
+                onChange={() => setOverallStatus('conditional')}
+                className="sr-only"
+              />
+              <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mb-2">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <span className="font-bold text-sm">พร้อมใช้งานแบบมีข้อสังเกต</span>
+              <span className="text-xs text-slate-500 mt-1">
+                ใช้งานได้ชั่วคราว มีจุดต้องเฝ้าระวังหรือสั่งซ่อมในวัน
+              </span>
+            </label>
 
-          {/* Not Ready */}
-          <label
-            className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col items-center text-center ${
-              overallStatus === 'not_ready'
-                ? 'border-rose-500 bg-rose-50/70 text-rose-900 shadow-xs'
-                : 'border-slate-200 hover:border-slate-300 text-slate-700'
-            }`}
-          >
-            <input
-              type="radio"
-              name="overallStatus"
-              value="not_ready"
-              checked={overallStatus === 'not_ready'}
-              onChange={() => setOverallStatus('not_ready')}
-              className="sr-only"
-            />
-            <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-2">
-              <XCircle className="w-6 h-6" />
-            </div>
-            <span className="font-bold text-sm">ไม่พร้อมใช้งาน (ห้ามขับ/ห้ามยก)</span>
-            <span className="text-xs text-slate-500 mt-1">
-              มีข้อบกพร่องร้ายแรงต่อความปลอดภัย ต้องส่งซ่อมทันที
-            </span>
-          </label>
-        </div>
+            {/* Not Ready */}
+            <label
+              className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex flex-col items-center text-center ${
+                overallStatus === 'not_ready'
+                  ? 'border-rose-500 bg-rose-50/70 text-rose-900 shadow-xs'
+                  : 'border-slate-200 hover:border-slate-300 text-slate-700'
+              }`}
+            >
+              <input
+                type="radio"
+                name="overallStatus"
+                value="not_ready"
+                checked={overallStatus === 'not_ready'}
+                onChange={() => setOverallStatus('not_ready')}
+                className="sr-only"
+              />
+              <div className="w-10 h-10 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-2">
+                <XCircle className="w-6 h-6" />
+              </div>
+              <span className="font-bold text-sm">ไม่พร้อมใช้งาน (ห้ามขับ/ห้ามยก)</span>
+              <span className="text-xs text-slate-500 mt-1">
+                มีข้อบกพร่องร้ายแรงต่อความปลอดภัย ต้องส่งซ่อมทันที
+              </span>
+            </label>
+          </div>
+        )}
 
         <div>
           <label htmlFor={summaryRemarksInputId} className="block text-xs font-semibold text-slate-700 mb-1">
-            ความเห็นเพิ่มเติม / สรุปสั่งการซ่อมบำรุง
+            {isNotInUseToday ? 'ความเห็น / หมายเหตุเพิ่มเติม' : 'ความเห็นเพิ่มเติม / สรุปสั่งการซ่อมบำรุง'}
           </label>
           <textarea
             id={summaryRemarksInputId}
             rows={2}
-            placeholder="เช่น ตรวจระดับน้ำมันไฮดรอลิกเรียบร้อย, นัดช่างตรวจซีลกระบอกยกสัปดาห์หน้า..."
+            placeholder={isNotInUseToday ? 'เช่น จอดประจำการที่การไฟฟ้า, วันหยุดนักขัตฤกษ์, สแตนด์บายรอภารกิจฉุกเฉิน...' : 'เช่น ตรวจระดับน้ำมันไฮดรอลิกเรียบร้อย, นัดช่างตรวจซีลกระบอกยกสัปดาห์หน้า...'}
             value={summaryRemarks}
             onChange={(e) => setSummaryRemarks(e.target.value)}
             className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
@@ -806,6 +949,11 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
             <>
               <RefreshCw className="w-4 h-4 animate-spin" />
               กำลังบันทึกและส่งเข้า Google Sheets...
+            </>
+          ) : isNotInUseToday ? (
+            <>
+              <Send className="w-4 h-4" />
+              บันทึก: ไม่มีการใช้งานในวันนี้
             </>
           ) : (
             <>

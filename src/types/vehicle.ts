@@ -44,7 +44,7 @@ export interface InspectionItem {
   remark?: string;
 }
 
-export type OverallStatus = 'ready' | 'conditional' | 'not_ready';
+export type OverallStatus = 'ready' | 'conditional' | 'not_ready' | 'not_used';
 
 export interface InspectionRecord {
   id: string;

@@ -38,6 +38,7 @@ export const OVERALL_STATUS_LABELS: Record<string, string> = {
   ready: 'พร้อมใช้งาน (ผ่าน)',
   conditional: 'พร้อมใช้งานแบบมีข้อสังเกต',
   not_ready: 'ไม่พร้อมใช้งาน (ห้ามขับ/ห้ามยก)',
+  not_used: 'ไม่มีการใช้งานในวันนี้',
 };
 
 export const ADMIN_ROLE_LABELS: Record<string, string> = {
@@ -682,7 +683,9 @@ export async function appendInspectionToSheet(
   const passCount = record.items.filter((i) => i.status === 'pass').length;
   const failItems = record.items.filter((i) => i.status === 'fail');
   const failSummary =
-    failItems.length > 0
+    record.overallStatus === 'not_used'
+      ? 'ไม่มีการใช้งานในวันนี้ (จอดประจำการ)'
+      : failItems.length > 0
       ? failItems.map((i) => `• [${i.category}] ${i.title}: ${i.remark || 'ชำรุด/ผิดปกติ'}`).join('\n')
       : 'ไม่มี (ผ่านทุกรายการ)';
 
@@ -760,7 +763,9 @@ export async function syncAllInspectionsToSheet(
       const passCount = r.items.filter((i) => i.status === 'pass').length;
       const failItems = r.items.filter((i) => i.status === 'fail');
       const failSummary =
-        failItems.length > 0
+        r.overallStatus === 'not_used'
+          ? 'ไม่มีการใช้งานในวันนี้ (จอดประจำการ)'
+          : failItems.length > 0
           ? failItems.map((i) => `• [${i.category}] ${i.title}: ${i.remark || 'ชำรุด'}`).join(' | ')
           : 'ปกติทุกรายการ';
       return [

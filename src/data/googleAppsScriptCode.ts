@@ -493,6 +493,7 @@ function formatOverallStatusLabel(st) {
   if (st === 'ready') return 'พร้อมใช้งาน (ผ่าน)';
   if (st === 'conditional') return 'พร้อมใช้งานแบบมีข้อสังเกต';
   if (st === 'not_ready') return 'ไม่พร้อมใช้งาน (ห้ามขับ/ห้ามยก)';
+  if (st === 'not_used') return 'ไม่มีการใช้งานในวันนี้';
   return st || 'พร้อมใช้งาน';
 }
 
@@ -511,9 +512,11 @@ function appendSingleInspection(ss, r) {
     failCount = failItems.length;
   }
 
-  var failSummary = failItems.length > 0
-    ? failItems.map(function(i) { return '[' + (i.category || '') + '] ' + i.title + ': ' + (i.remark || 'ชำรุด'); }).join(' | ')
-    : 'ปกติทุกรายการ';
+  var failSummary = r.overallStatus === 'not_used'
+    ? 'ไม่มีการใช้งานในวันนี้ (จอดประจำการ)'
+    : (failItems.length > 0
+      ? failItems.map(function(i) { return '[' + (i.category || '') + '] ' + i.title + ': ' + (i.remark || 'ชำรุด'); }).join(' | ')
+      : 'ปกติทุกรายการ');
 
   var row = [
     r.id || ('insp-' + new Date().getTime()),
