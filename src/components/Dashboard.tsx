@@ -149,6 +149,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
       : selectedBranches.length === 1
       ? selectedBranches[0]
       : `${selectedBranches.join(', ')} (${selectedBranches.length} การไฟฟ้า)`;
+
+    const systemUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : '';
+
     const textLines = [
       `📢 สรุปรายชื่อยานพาหนะที่ "ยังไม่ได้ตรวจสภาพก่อนปฏิบัติงาน" ประจำวัน (${branchTitle}):`,
       `📅 วันที่: ${formattedTodayDate}`,
@@ -165,6 +168,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }),
       `----------------------------------------`,
       `*กรุณาตรวจสภาพรถตามแบบฟอร์มก่อนนำรถออกปฏิบัติงาน เพื่อความปลอดภัยสูงสุด*`,
+      ...(systemUrl
+        ? [
+            ``,
+            `🔗 เข้าสู่ระบบตรวจสภาพยานพาหนะได้ที่:`,
+            systemUrl,
+          ]
+        : []),
     ];
 
     navigator.clipboard.writeText(textLines.join('\n'));
