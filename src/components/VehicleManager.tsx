@@ -15,10 +15,12 @@ import {
   Building, 
   X,
   Zap,
-  Lock
+  Lock,
+  QrCode
 } from 'lucide-react';
 import { Vehicle, VehicleType, VehicleStatus, FuelType, VehicleCategory } from '../types/vehicle';
 import { ConfirmModal } from './ConfirmModal';
+import { VehicleQrModal } from './VehicleQrModal';
 
 interface VehicleManagerProps {
   vehicles: Vehicle[];
@@ -133,6 +135,18 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [deletingVehicleId, setDeletingVehicleId] = useState<string | null>(null);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+  const [qrModalVehicle, setQrModalVehicle] = useState<Vehicle | null>(null);
+
+  const handleOpenSingleQr = (vehicle: Vehicle) => {
+    setQrModalVehicle(vehicle);
+    setIsQrModalOpen(true);
+  };
+
+  const handleOpenBatchQr = () => {
+    setQrModalVehicle(null);
+    setIsQrModalOpen(true);
+  };
 
   // Form states
   const [formError, setFormError] = useState('');
@@ -258,22 +272,33 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
             แยกข้อมูลตามการไฟฟ้าส่วนภูมิภาค ({availableBranches.length} สังกัด) • แบ่ง 3 กลุ่มประเภทรถ ({vehicles.length} คัน)
           </p>
         </div>
-        {isAdmin ? (
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
-            onClick={handleOpenAdd}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-xl shadow-xs transition-all active:scale-98 shrink-0"
+            onClick={handleOpenBatchQr}
+            className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm rounded-xl shadow-xs transition-all active:scale-98 shrink-0"
+            title="สร้างและพิมพ์คิวอาร์โค้ดสติกเกอร์สำหรับติดหน้ารถแต่ละคัน"
           >
-            <Plus className="w-4 h-4" />
-            เพิ่มยานพาหนะใหม่
+            <QrCode className="w-4 h-4 text-amber-300" />
+            <span>พิมพ์ QR Code ติดรถ</span>
           </button>
-        ) : (
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold">
-              <Lock className="w-3.5 h-3.5 text-slate-500" />
-              <span>โหมดผู้ใช้งานทั่วไป (เฉพาะ Admin ที่เพิ่ม/แก้ไข/ลบรถได้)</span>
-            </span>
-          </div>
-        )}
+
+          {isAdmin ? (
+            <button
+              onClick={handleOpenAdd}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-xl shadow-xs transition-all active:scale-98 shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              เพิ่มยานพาหนะใหม่
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 border border-slate-200 text-slate-600 rounded-xl text-xs font-semibold">
+                <Lock className="w-3.5 h-3.5 text-slate-500" />
+                <span>โหมดผู้ใช้งานทั่วไป</span>
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Quick PEA Branch Selection Tabs */}
@@ -497,32 +522,43 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
                 </div>
 
                 {/* Card Actions */}
-                <div className="px-5 py-3 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-2">
-                  {isAdmin ? (
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleOpenEdit(v)}
-                        title="แก้ไขข้อมูลรถ (เฉพาะผู้ดูแลระบบ)"
-                        className="p-2 rounded-lg text-slate-600 hover:text-blue-600 hover:bg-white border border-transparent hover:border-slate-200 transition-all text-xs flex items-center gap-1"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>แก้ไข</span>
-                      </button>
-                      <button
-                        onClick={() => setDeletingVehicleId(v.id)}
-                        title="ลบยานพาหนะ (เฉพาะผู้ดูแลระบบ)"
-                        className="p-2 rounded-lg text-slate-600 hover:text-red-600 hover:bg-white border border-transparent hover:border-slate-200 transition-all text-xs flex items-center gap-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>ลบ</span>
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 text-slate-400 text-xs px-1">
-                      <Lock className="w-3 h-3 text-slate-400" />
-                      <span>ดูข้อมูลเท่านั้น</span>
-                    </div>
-                  )}
+                <div className="px-5 py-3 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1">
+                    {isAdmin ? (
+                      <>
+                        <button
+                          onClick={() => handleOpenEdit(v)}
+                          title="แก้ไขข้อมูลรถ (เฉพาะผู้ดูแลระบบ)"
+                          className="p-2 rounded-lg text-slate-600 hover:text-blue-600 hover:bg-white border border-transparent hover:border-slate-200 transition-all text-xs flex items-center gap-1"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>แก้ไข</span>
+                        </button>
+                        <button
+                          onClick={() => setDeletingVehicleId(v.id)}
+                          title="ลบยานพาหนะ (เฉพาะผู้ดูแลระบบ)"
+                          className="p-2 rounded-lg text-slate-600 hover:text-red-600 hover:bg-white border border-transparent hover:border-slate-200 transition-all text-xs flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>ลบ</span>
+                        </button>
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-1 text-slate-400 text-xs px-1">
+                        <Lock className="w-3 h-3 text-slate-400" />
+                        <span className="hidden sm:inline">ดูข้อมูลเท่านั้น</span>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => handleOpenSingleQr(v)}
+                      title="สร้างและพิมพ์ QR Code ติดหน้ารถคันนี้"
+                      className="p-2 rounded-lg text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-all text-xs flex items-center gap-1 font-semibold"
+                    >
+                      <QrCode className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>QR ติดรถ</span>
+                    </button>
+                  </div>
 
                   <button
                     onClick={() => onStartInspection(v.id)}
@@ -865,6 +901,15 @@ export const VehicleManager: React.FC<VehicleManagerProps> = ({
           }
         }}
         onCancel={() => setDeletingVehicleId(null)}
+      />
+
+      {/* Vehicle QR Code Generator and Printable Windshield Sticker Modal */}
+      <VehicleQrModal
+        isOpen={isQrModalOpen}
+        onClose={() => setIsQrModalOpen(false)}
+        vehicles={vehicles}
+        initialVehicle={qrModalVehicle}
+        peaBranches={availableBranches}
       />
     </div>
   );

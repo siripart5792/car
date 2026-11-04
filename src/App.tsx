@@ -235,6 +235,39 @@ export default function App() {
     };
   }, [handlePullFromSheets]);
 
+  // 1.1 Auto-detect QR Code scan URL parameter (e.g. ?inspect=<vehicleId> or ?vehicleId=<id>)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const inspectTarget = params.get('inspect') || params.get('inspectVehicleId') || params.get('vehicleId');
+    if (inspectTarget) {
+      const decodedTarget = decodeURIComponent(inspectTarget).trim();
+      const matched = vehicles.find(
+        (v) => v.id === decodedTarget || v.licensePlate.toLowerCase() === decodedTarget.toLowerCase()
+      );
+      const targetVehicleId = matched ? matched.id : decodedTarget;
+
+      setPreselectedVehicleId(targetVehicleId);
+      setActiveTab('inspect');
+
+      if (matched) {
+        showToast(`สแกน QR Code สำเร็จ: เลือกยานพาหนะทะเบียน ${matched.licensePlate} เรียบร้อยแล้ว`, 'success');
+      } else {
+        showToast('กำลังเปิดแบบฟอร์มตรวจเช็คสภาพยานพาหนะ...', 'info');
+      }
+
+      // Clean query parameters from URL history without page reload
+      try {
+        const newUrl = new URL(window.location.href);
+        newUrl.searchParams.delete('inspect');
+        newUrl.searchParams.delete('inspectVehicleId');
+        newUrl.searchParams.delete('vehicleId');
+        window.history.replaceState({}, '', newUrl.pathname + (newUrl.search ? newUrl.search : '') + newUrl.hash);
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, [vehicles]);
+
   // 2. Initialize Firebase Auth State Listener & Google Workspace token check
   useEffect(() => {
     // Check cached token and auto-fetch/verify spreadsheet immediately on launch

@@ -22,7 +22,8 @@ import {
   CheckSquare,
   Square,
   X,
-  Filter
+  Filter,
+  QrCode
 } from 'lucide-react';
 import { Vehicle, InspectionRecord } from '../types/vehicle';
 import { SpreadsheetInfo } from '../services/googleSheets';
@@ -478,6 +479,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
             >
               <ClipboardCheck className="w-4 h-4" />
               เริ่มตรวจเช็คสภาพรถตอนนี้
+            </button>
+
+            <button
+              onClick={() => onNavigateToTab('vehicles')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-500/30 hover:bg-indigo-500/40 text-amber-300 font-semibold text-sm rounded-xl backdrop-blur-md transition-all border border-indigo-400/30"
+              title="ดูและพิมพ์ QR Code ติดหน้ารถทุกคัน"
+            >
+              <QrCode className="w-4 h-4 text-amber-300" />
+              <span>QR Code ติดหน้ารถ</span>
             </button>
 
             <button
