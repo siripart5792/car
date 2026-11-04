@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   History, 
   Car, 
@@ -21,10 +21,40 @@ import {
   ClipboardCheck,
   PauseCircle,
   ChevronDown,
-  Check
+  Check,
+  Download,
+  BarChart3,
+  Table,
+  LayoutGrid,
+  Layers,
+  CalendarDays,
+  ChevronUp,
+  ArrowUpDown
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { InspectionRecord, Vehicle, OverallStatus } from '../types/vehicle';
 import { ConfirmModal } from './ConfirmModal';
+
+export interface VehiclePeriodSummary {
+  vehicleId: string;
+  licensePlate: string;
+  brand: string;
+  model: string;
+  peaBranch: string;
+  category: string;
+  daysCount: number; // ตรวจกี่วัน
+  timesCount: number; // ตรวจกี่ครั้ง
+  readyCount: number;
+  conditionalCount: number;
+  notReadyCount: number;
+  notUsedCount: number;
+  lastDateStr: string;
+  lastTimeString: string;
+  lastOdometer: number;
+  lastInspector: string;
+  lastStatus: OverallStatus;
+  inspectionDates: string[];
+}
 
 interface InspectionHistoryProps {
   records: InspectionRecord[];
@@ -106,6 +136,12 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
 
   const [activeRecord, setActiveRecord] = useState<InspectionRecord | null>(null);
   const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null);
+
+  // Vehicle summary & Excel export state
+  const [summaryViewMode, setSummaryViewMode] = useState<'table' | 'cards'>('table');
+  const [isSummaryCollapsed, setIsSummaryCollapsed] = useState<boolean>(false);
+  const [summarySortBy, setSummarySortBy] = useState<'times' | 'days' | 'plate'>('times');
+  const [isExporting, setIsExporting] = useState<boolean>(false);
 
   const formatYMD = (d: Date) => {
     const year = d.getFullYear();
@@ -206,6 +242,280 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
 
   const deletingRecord = records.find((r) => r.id === deletingRecordId);
 
+  // Group filtered records by vehicle and compute inspection frequency (ตรวจกี่วัน, ตรวจกี่ครั้ง)
+  const vehicleSummaries: VehiclePeriodSummary[] = useMemo(() => {
+    const map = new Map<string, InspectionRecord[]>();
+
+    filteredRecords.forEach((rec) => {
+      // Use vehicleId or fallback to license plate
+      const key = rec.vehicleId || rec.vehicleLicensePlate;
+      const existing = map.get(key) || [];
+      existing.push(rec);
+      map.set(key, existing);
+    });
+
+    const list: VehiclePeriodSummary[] = [];
+
+    map.forEach((recs, vId) => {
+      // Sort records for this vehicle descending by inspection date
+      const sorted = [...recs].sort((a, b) => {
+        const timeA = new Date(a.inspectionDate).getTime() || 0;
+        const timeB = new Date(b.inspectionDate).getTime() || 0;
+        return timeB - timeA;
+      });
+
+      const latest = sorted[0];
+
+      // Count distinct calendar dates (ตรวจกี่วัน)
+      const uniqueDays = new Set<string>();
+      sorted.forEach((r) => {
+        const dStr = getRecordDateString(r.inspectionDate);
+        if (dStr) uniqueDays.add(dStr);
+      });
+
+      const readyCount = sorted.filter((r) => r.overallStatus === 'ready').length;
+      const conditionalCount = sorted.filter((r) => r.overallStatus === 'conditional').length;
+      const notReadyCount = sorted.filter((r) => r.overallStatus === 'not_ready').length;
+      const notUsedCount = sorted.filter((r) => r.overallStatus === 'not_used').length;
+
+      let lastDateStr = '-';
+      let lastTimeString = '';
+      try {
+        const latestD = new Date(latest.inspectionDate);
+        if (!isNaN(latestD.getTime())) {
+          lastDateStr = latestD.toLocaleDateString('th-TH', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+          });
+          lastTimeString = latestD.toLocaleTimeString('th-TH', {
+            hour: '2-digit',
+            minute: '2-digit',
+          }) + ' น.';
+        } else {
+          lastDateStr = latest.inspectionDate.substring(0, 10);
+        }
+      } catch {
+        lastDateStr = latest.inspectionDate.substring(0, 10);
+      }
+
+      list.push({
+        vehicleId: latest.vehicleId || vId,
+        licensePlate: latest.vehicleLicensePlate,
+        brand: latest.brand,
+        model: latest.model,
+        peaBranch: latest.peaBranch || 'กฟภ. สำนักงานใหญ่',
+        category: latest.vehicleCategory,
+        daysCount: uniqueDays.size,
+        timesCount: sorted.length,
+        readyCount,
+        conditionalCount,
+        notReadyCount,
+        notUsedCount,
+        lastDateStr,
+        lastTimeString,
+        lastOdometer: latest.odometer || 0,
+        lastInspector: latest.inspectorName || '-',
+        lastStatus: latest.overallStatus,
+        inspectionDates: Array.from(uniqueDays).sort().reverse(),
+      });
+    });
+
+    // Sort summary according to user preference
+    return list.sort((a, b) => {
+      if (summarySortBy === 'times') {
+        if (b.timesCount !== a.timesCount) return b.timesCount - a.timesCount;
+        return b.daysCount - a.daysCount;
+      }
+      if (summarySortBy === 'days') {
+        if (b.daysCount !== a.daysCount) return b.daysCount - a.daysCount;
+        return b.timesCount - a.timesCount;
+      }
+      return a.licensePlate.localeCompare(b.licensePlate, 'th');
+    });
+  }, [filteredRecords, summarySortBy]);
+
+  // Overall statistics for the selected reporting period
+  const totalUniqueDaysInPeriod = useMemo(() => {
+    const days = new Set<string>();
+    filteredRecords.forEach((r) => {
+      const d = getRecordDateString(r.inspectionDate);
+      if (d) days.add(d);
+    });
+    return days.size;
+  }, [filteredRecords]);
+
+  const totalReadyCount = filteredRecords.filter((r) => r.overallStatus === 'ready').length;
+  const totalIssueCount = filteredRecords.filter((r) => r.overallStatus === 'conditional' || r.overallStatus === 'not_ready').length;
+  const totalNotUsedCount = filteredRecords.filter((r) => r.overallStatus === 'not_used').length;
+
+  // Export to Excel function (.xlsx)
+  const handleExportExcel = () => {
+    if (filteredRecords.length === 0) {
+      alert('ไม่พบข้อมูลการตรวจเช็คที่ตรงกับเงื่อนไขสำหรับการส่งออก');
+      return;
+    }
+
+    try {
+      setIsExporting(true);
+
+      // Sheet 1: สรุปความถี่การตรวจรายคัน (Vehicle Summary)
+      const summaryRows = vehicleSummaries.map((s, idx) => ({
+        'ลำดับ': idx + 1,
+        'ทะเบียนรถ': s.licensePlate,
+        'ยี่ห้อ - รุ่น': `${s.brand} ${s.model}`.trim(),
+        'การไฟฟ้าสังกัด': s.peaBranch,
+        'กลุ่มประเภทรถ':
+          s.category === 'bucket_truck_class_c'
+            ? '3. รถกระเช้า Class C'
+            : s.category === 'crane_truck'
+            ? '2. รถบรรทุกติดเครนไฮดรอลิค'
+            : '1. ยานพาหนะทั่วไป',
+        'ตรวจกี่วัน (วัน)': s.daysCount,
+        'ตรวจกี่ครั้ง (ครั้ง)': s.timesCount,
+        'พร้อมใช้งาน (ครั้ง)': s.readyCount,
+        'มีข้อสังเกต (ครั้ง)': s.conditionalCount,
+        'ห้ามปฏิบัติงาน (ครั้ง)': s.notReadyCount,
+        'ไม่มีการใช้งานในวันนี้ (ครั้ง)': s.notUsedCount,
+        'ตรวจล่าสุดวันที่': s.lastDateStr,
+        'เวลาตรวจล่าสุด': s.lastTimeString,
+        'เลขไมล์ล่าสุด (กม.)': s.lastOdometer,
+        'ผู้ตรวจล่าสุด': s.lastInspector,
+        'สถานะล่าสุด':
+          s.lastStatus === 'ready'
+            ? 'พร้อมใช้งาน'
+            : s.lastStatus === 'conditional'
+            ? 'มีข้อสังเกต'
+            : s.lastStatus === 'not_ready'
+            ? 'ห้ามปฏิบัติงาน'
+            : 'ไม่มีการใช้งานในวันนี้',
+        'วันที่ตรวจทั้งหมดในรอบนี้': s.inspectionDates.join(', '),
+      }));
+
+      // Sheet 2: รายละเอียดการตรวจเช็คย้อนหลัง (Detailed Log)
+      const detailRows = filteredRecords.map((r, idx) => {
+        let dateStr = '-';
+        let timeStr = '';
+        try {
+          const d = new Date(r.inspectionDate);
+          if (!isNaN(d.getTime())) {
+            dateStr = d.toLocaleDateString('th-TH');
+            timeStr = d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+          } else {
+            dateStr = r.inspectionDate.substring(0, 10);
+          }
+        } catch {
+          dateStr = r.inspectionDate.substring(0, 10);
+        }
+
+        const passCount = r.items.filter((i) => i.status === 'pass').length;
+        const failCount = r.items.filter((i) => i.status === 'fail').length;
+        const failedItems = r.items
+          .filter((i) => i.status === 'fail')
+          .map((i) => `${i.title}${i.remark ? ` (${i.remark})` : ''}`)
+          .join('; ');
+
+        const statusLabel =
+          r.overallStatus === 'ready'
+            ? 'พร้อมใช้งาน'
+            : r.overallStatus === 'conditional'
+            ? 'มีข้อสังเกต'
+            : r.overallStatus === 'not_ready'
+            ? 'ห้ามปฏิบัติงาน'
+            : 'ไม่มีการใช้งานในวันนี้';
+
+        const catLabel =
+          r.vehicleCategory === 'bucket_truck_class_c'
+            ? '3. รถกระเช้า Class C'
+            : r.vehicleCategory === 'crane_truck'
+            ? '2. รถบรรทุกติดเครนไฮดรอลิค'
+            : '1. ยานพาหนะทั่วไป';
+
+        return {
+          'ลำดับ': idx + 1,
+          'รหัสเอกสาร': r.id,
+          'วันที่ตรวจ': dateStr,
+          'เวลาที่ตรวจ': timeStr,
+          'ทะเบียนรถ': r.vehicleLicensePlate,
+          'ยี่ห้อ - รุ่น': `${r.brand} ${r.model}`.trim(),
+          'การไฟฟ้าสังกัด': r.peaBranch || 'กฟภ. สำนักงานใหญ่',
+          'กลุ่มประเภทรถ': catLabel,
+          'ผู้ตรวจเช็ค': r.inspectorName,
+          'เบอร์ติดต่อ': r.inspectorPhone || '-',
+          'สังกัด/แผนก': r.department || '-',
+          'ภารกิจ/งานที่ปฏิบัติ': r.workDescription || '-',
+          'เลขไมล์ (กม.)': r.odometer,
+          'ผลการตรวจรวม': statusLabel,
+          'ผ่าน (ข้อ)': passCount,
+          'ข้อบกพร่อง (ข้อ)': failCount,
+          'รายละเอียดข้อบกพร่องที่พบ': failedItems || '-',
+          'ความเห็นเพิ่มเติม/สั่งการ': r.summaryRemarks || '-',
+        };
+      });
+
+      const wb = XLSX.utils.book_new();
+
+      // Create sheet 1
+      const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+      wsSummary['!cols'] = [
+        { wch: 6 },
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 22 },
+        { wch: 22 },
+        { wch: 16 },
+        { wch: 18 },
+        { wch: 16 },
+        { wch: 16 },
+        { wch: 18 },
+        { wch: 20 },
+        { wch: 16 },
+        { wch: 14 },
+        { wch: 16 },
+        { wch: 20 },
+        { wch: 16 },
+        { wch: 35 },
+      ];
+      XLSX.utils.book_append_sheet(wb, wsSummary, 'สรุปความถี่การตรวจรายคัน');
+
+      // Create sheet 2
+      const wsDetails = XLSX.utils.json_to_sheet(detailRows);
+      wsDetails['!cols'] = [
+        { wch: 6 },
+        { wch: 16 },
+        { wch: 14 },
+        { wch: 12 },
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 22 },
+        { wch: 22 },
+        { wch: 20 },
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 24 },
+        { wch: 14 },
+        { wch: 18 },
+        { wch: 10 },
+        { wch: 14 },
+        { wch: 30 },
+        { wch: 25 },
+      ];
+      XLSX.utils.book_append_sheet(wb, wsDetails, 'บันทึกการตรวจละเอียด');
+
+      // Construct filename
+      const startTag = startDate || 'ทั้งหมด';
+      const endTag = endDate || 'ปัจจุบัน';
+      const fileName = `PEA_รายงานตรวจสภาพยานพาหนะ_${startTag}_ถึง_${endTag}.xlsx`;
+
+      XLSX.writeFile(wb, fileName);
+    } catch (err) {
+      console.error('Export Excel failed:', err);
+      alert('เกิดข้อผิดพลาดในการส่งออกไฟล์ Excel');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -224,16 +534,28 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
           </p>
         </div>
 
-        {canOpenSpreadsheet && isSheetsConnected && onOpenSheets && (
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <button
-            onClick={onOpenSheets}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-medium text-xs rounded-xl transition-all self-start sm:self-auto"
-            title="เปิดสเปรดชีต Google Sheets (เฉพาะผู้ดูแลระบบ)"
+            onClick={handleExportExcel}
+            disabled={filteredRecords.length === 0 || isExporting}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium text-xs rounded-xl transition-all shadow-xs hover:shadow-md cursor-pointer"
+            title="ส่งออกรายงานสรุปความถี่และรายละเอียดการตรวจเช็คเป็นไฟล์ Excel (.xlsx)"
           >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-            เปิดสเปรดชีต Google Sheets
+            <Download className="w-4 h-4" />
+            <span>{isExporting ? 'กำลังสร้างไฟล์...' : 'ส่งออกรายงาน Excel (.xlsx)'}</span>
           </button>
-        )}
+
+          {canOpenSpreadsheet && isSheetsConnected && onOpenSheets && (
+            <button
+              onClick={onOpenSheets}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-medium text-xs rounded-xl transition-all"
+              title="เปิดสเปรดชีต Google Sheets (เฉพาะผู้ดูแลระบบ)"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              เปิดสเปรดชีต Google Sheets
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filter and Search Bar */}
@@ -571,6 +893,474 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
             </button>
           </div>
         )}
+      </div>
+
+      {/* Overview KPI Cards for Selected Reporting Period */}
+      {filteredRecords.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+              <Car className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-500 block">รถที่ตรวจในรอบนี้</span>
+              <div className="text-lg font-bold text-slate-900">
+                {vehicleSummaries.length}{' '}
+                <span className="text-xs font-normal text-slate-500">คัน</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+              <CalendarDays className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-500 block">วันที่มีการตรวจ</span>
+              <div className="text-lg font-bold text-indigo-900">
+                {totalUniqueDaysInPeriod}{' '}
+                <span className="text-xs font-normal text-slate-500">วัน</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+              <ClipboardCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[11px] font-semibold text-slate-500 block">จำนวนครั้งที่ตรวจรวม</span>
+              <div className="text-lg font-bold text-emerald-900">
+                {filteredRecords.length}{' '}
+                <span className="text-xs font-normal text-slate-500">ครั้ง</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+              <BarChart3 className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-[11px] font-semibold text-slate-500 block truncate">สรุปสถานะผลตรวจ</span>
+              <div className="flex items-center gap-1.5 flex-wrap text-xs font-bold">
+                <span className="text-emerald-600" title="พร้อมใช้งาน">✓ {totalReadyCount}</span>
+                {totalIssueCount > 0 && (
+                  <span className="text-amber-600" title="มีข้อสังเกต / ห้ามปฏิบัติงาน">⚠️ {totalIssueCount}</span>
+                )}
+                {totalNotUsedCount > 0 && (
+                  <span className="text-slate-500" title="ไม่มีการใช้งานในวันนี้">⏸️ {totalNotUsedCount}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Vehicle Inspection Frequency Summary (ตรวจกี่วัน และ ตรวจกี่ครั้ง ในแต่ละช่วงรายงาน) */}
+      {filteredRecords.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden transition-all">
+          {/* Section Header */}
+          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-gradient-to-r from-slate-50/80 to-white">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                <BarChart3 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-900">
+                    สรุปความถี่การตรวจเช็ครายคันตามช่วงเวลา
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    {vehicleSummaries.length} คัน
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  ระบุชัดเจนว่ารถแต่ละคันมีการ<strong className="text-slate-800 font-semibold">ตรวจกี่วัน</strong> และ<strong className="text-slate-800 font-semibold">ตรวจกี่ครั้ง</strong> ในช่วงเวลาที่เลือก
+                </p>
+              </div>
+            </div>
+
+            {/* Controls: Sorting, View Toggle, Excel Export, Collapse */}
+            <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+              {/* Sort Selector */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs">
+                <span className="text-[11px] font-medium text-slate-500 pl-1.5 flex items-center gap-1">
+                  <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                  เรียง:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSummarySortBy('times')}
+                  className={`px-2 py-1 rounded-lg font-medium transition-all ${
+                    summarySortBy === 'times'
+                      ? 'bg-white text-indigo-700 font-bold shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="เรียงตามจำนวนครั้งที่ตรวจมากที่สุด"
+                >
+                  จำนวนครั้ง
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSummarySortBy('days')}
+                  className={`px-2 py-1 rounded-lg font-medium transition-all ${
+                    summarySortBy === 'days'
+                      ? 'bg-white text-indigo-700 font-bold shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="เรียงตามจำนวนวันที่ตรวจมากที่สุด"
+                >
+                  จำนวนวัน
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSummarySortBy('plate')}
+                  className={`px-2 py-1 rounded-lg font-medium transition-all ${
+                    summarySortBy === 'plate'
+                      ? 'bg-white text-indigo-700 font-bold shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                  title="เรียงตามทะเบียนรถ"
+                >
+                  ทะเบียน
+                </button>
+              </div>
+
+              {/* View Mode Toggle: Table / Cards */}
+              <div className="flex items-center bg-slate-100 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setSummaryViewMode('table')}
+                  className={`p-1.5 rounded-lg text-xs flex items-center gap-1 transition-all ${
+                    summaryViewMode === 'table'
+                      ? 'bg-white text-indigo-700 shadow-2xs font-bold'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                  title="มุมมองตารางสรุป"
+                >
+                  <Table className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">ตาราง</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSummaryViewMode('cards')}
+                  className={`p-1.5 rounded-lg text-xs flex items-center gap-1 transition-all ${
+                    summaryViewMode === 'cards'
+                      ? 'bg-white text-indigo-700 shadow-2xs font-bold'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                  title="มุมมองการ์ดสรุป"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">การ์ด</span>
+                </button>
+              </div>
+
+              {/* Excel Export Quick Button */}
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                disabled={isExporting}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                title="ส่งออกรายงานและสถิตินี้เป็น Excel (.xlsx)"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">ส่งออก</span> Excel
+              </button>
+
+              {/* Collapse/Expand Toggle */}
+              <button
+                type="button"
+                onClick={() => setIsSummaryCollapsed(!isSummaryCollapsed)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                title={isSummaryCollapsed ? 'ขยายส่วนสรุปรายคัน' : 'ย่อส่วนสรุปรายคัน'}
+              >
+                {isSummaryCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Section Body */}
+          {!isSummaryCollapsed && (
+            <div className="p-4 sm:p-5">
+              {summaryViewMode === 'table' ? (
+                /* Table View */
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-600 font-semibold">
+                        <th className="py-3 px-3.5 text-center w-12">ลำดับ</th>
+                        <th className="py-3 px-3.5">ทะเบียนรถ / ยี่ห้อ - รุ่น</th>
+                        <th className="py-3 px-3.5">สังกัดการไฟฟ้า</th>
+                        <th className="py-3 px-3.5 text-center bg-blue-50/50">
+                          <span className="inline-flex items-center gap-1 text-blue-800 font-bold">
+                            <CalendarDays className="w-3.5 h-3.5 text-blue-600" />
+                            ตรวจกี่วัน
+                          </span>
+                        </th>
+                        <th className="py-3 px-3.5 text-center bg-emerald-50/50">
+                          <span className="inline-flex items-center gap-1 text-emerald-800 font-bold">
+                            <ClipboardCheck className="w-3.5 h-3.5 text-emerald-600" />
+                            ตรวจกี่ครั้ง
+                          </span>
+                        </th>
+                        <th className="py-3 px-3.5">ผลการตรวจสภาพ</th>
+                        <th className="py-3 px-3.5">ตรวจล่าสุด</th>
+                        <th className="py-3 px-3.5 text-center">จัดการ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {vehicleSummaries.map((s, idx) => {
+                        const isFiltered = selectedVehicleFilter === s.vehicleId;
+                        return (
+                          <tr
+                            key={s.vehicleId}
+                            className={`transition-colors ${
+                              isFiltered ? 'bg-indigo-50/60 font-medium' : 'hover:bg-slate-50/70'
+                            }`}
+                          >
+                            <td className="py-3 px-3.5 text-center font-mono text-slate-400">
+                              {idx + 1}
+                            </td>
+                            <td className="py-3 px-3.5">
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 bg-slate-900 text-white font-mono font-bold text-xs rounded-md shadow-2xs">
+                                  {s.licensePlate}
+                                </span>
+                                <span className="font-semibold text-slate-800">
+                                  {s.brand} {s.model}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-3.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="px-2 py-0.5 bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-md font-semibold text-[11px]">
+                                  ⚡ {s.peaBranch}
+                                </span>
+                                <span className="text-[10px] text-slate-400">
+                                  {s.category === 'bucket_truck_class_c'
+                                    ? 'กระเช้า C'
+                                    : s.category === 'crane_truck'
+                                    ? 'ติดเครน'
+                                    : 'รถทั่วไป'}
+                                </span>
+                              </div>
+                            </td>
+                            {/* Days Count */}
+                            <td className="py-3 px-3.5 text-center bg-blue-50/30">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-100/90 text-blue-900 font-extrabold text-xs shadow-2xs">
+                                <CalendarDays className="w-3.5 h-3.5 text-blue-600" />
+                                {s.daysCount} วัน
+                              </span>
+                            </td>
+                            {/* Times Count */}
+                            <td className="py-3 px-3.5 text-center bg-emerald-50/30">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-100/90 text-emerald-900 font-extrabold text-xs shadow-2xs">
+                                <ClipboardCheck className="w-3.5 h-3.5 text-emerald-700" />
+                                {s.timesCount} ครั้ง
+                              </span>
+                            </td>
+                            {/* Status Breakdown */}
+                            <td className="py-3 px-3.5">
+                              <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                                {s.readyCount > 0 && (
+                                  <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md font-semibold">
+                                    ✓ ผ่าน {s.readyCount}
+                                  </span>
+                                )}
+                                {s.conditionalCount > 0 && (
+                                  <span className="px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-md font-semibold">
+                                    ⚠️ สังเกต {s.conditionalCount}
+                                  </span>
+                                )}
+                                {s.notReadyCount > 0 && (
+                                  <span className="px-1.5 py-0.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-md font-semibold">
+                                    ✕ ห้ามใช้ {s.notReadyCount}
+                                  </span>
+                                )}
+                                {s.notUsedCount > 0 && (
+                                  <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 border border-slate-200 rounded-md font-medium">
+                                    ⏸️ ไม่ได้ใช้ {s.notUsedCount}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            {/* Latest Inspection */}
+                            <td className="py-3 px-3.5 text-slate-600">
+                              <div className="text-[11px] font-medium text-slate-800">
+                                {s.lastDateStr} {s.lastTimeString}
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                โดย {s.lastInspector} • {s.lastOdometer.toLocaleString()} กม.
+                              </div>
+                            </td>
+                            {/* Actions */}
+                            <td className="py-3 px-3.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (selectedVehicleFilter === s.vehicleId) {
+                                    setSelectedVehicleFilter('all');
+                                  } else {
+                                    setSelectedVehicleFilter(s.vehicleId);
+                                  }
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                                  selectedVehicleFilter === s.vehicleId
+                                    ? 'bg-indigo-600 text-white shadow-2xs'
+                                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                }`}
+                                title={
+                                  selectedVehicleFilter === s.vehicleId
+                                    ? 'คลิกเพื่อแสดงรถทุกคัน'
+                                    : 'คลิกเพื่อกรองดูประวัติการตรวจเฉพาะคันนี้'
+                                }
+                              >
+                                {selectedVehicleFilter === s.vehicleId ? 'แสดงทั้งหมด' : 'ดูประวัติคันนี้'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                /* Cards View */
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {vehicleSummaries.map((s) => {
+                    const isFiltered = selectedVehicleFilter === s.vehicleId;
+                    return (
+                      <div
+                        key={s.vehicleId}
+                        className={`p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
+                          isFiltered
+                            ? 'bg-indigo-50/70 border-indigo-300 shadow-sm ring-2 ring-indigo-500/20'
+                            : 'bg-slate-50/60 border-slate-200 hover:border-slate-300 hover:bg-white hover:shadow-xs'
+                        }`}
+                      >
+                        {/* Top: Plate & Branch */}
+                        <div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="px-2.5 py-0.5 bg-slate-900 text-white font-mono font-bold text-xs rounded-lg shadow-2xs">
+                              {s.licensePlate}
+                            </span>
+                            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-md font-semibold text-[11px] truncate">
+                              ⚡ {s.peaBranch}
+                            </span>
+                          </div>
+                          <div className="mt-1 font-bold text-slate-800 text-sm">
+                            {s.brand} {s.model}
+                          </div>
+                        </div>
+
+                        {/* Frequency Metrics Highlight: ตรวจกี่วัน / ตรวจกี่ครั้ง */}
+                        <div className="grid grid-cols-2 gap-2 bg-white p-2.5 rounded-xl border border-slate-200/80">
+                          <div className="bg-blue-50/70 p-2 rounded-lg text-center border border-blue-100">
+                            <span className="text-[10px] font-semibold text-blue-700 flex items-center justify-center gap-1">
+                              <CalendarDays className="w-3 h-3 text-blue-600" />
+                              ตรวจกี่วัน
+                            </span>
+                            <div className="text-base font-extrabold text-blue-900 mt-0.5">
+                              {s.daysCount} <span className="text-xs font-semibold text-blue-600">วัน</span>
+                            </div>
+                          </div>
+
+                          <div className="bg-emerald-50/70 p-2 rounded-lg text-center border border-emerald-100">
+                            <span className="text-[10px] font-semibold text-emerald-700 flex items-center justify-center gap-1">
+                              <ClipboardCheck className="w-3 h-3 text-emerald-600" />
+                              ตรวจกี่ครั้ง
+                            </span>
+                            <div className="text-base font-extrabold text-emerald-900 mt-0.5">
+                              {s.timesCount} <span className="text-xs font-semibold text-emerald-600">ครั้ง</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Status Breakdown & Last Inspection */}
+                        <div className="space-y-2 text-xs">
+                          <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                            {s.readyCount > 0 && (
+                              <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-200 font-semibold">
+                                ✓ พร้อม {s.readyCount}
+                              </span>
+                            )}
+                            {s.conditionalCount > 0 && (
+                              <span className="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded border border-amber-200 font-semibold">
+                                ⚠️ สังเกต {s.conditionalCount}
+                              </span>
+                            )}
+                            {s.notReadyCount > 0 && (
+                              <span className="px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded border border-rose-200 font-semibold">
+                                ✕ ห้ามใช้ {s.notReadyCount}
+                              </span>
+                            )}
+                            {s.notUsedCount > 0 && (
+                              <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded border border-slate-200 font-medium">
+                                ⏸️ ไม่ได้ใช้ {s.notUsedCount}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+                            <span>ล่าสุด: {s.lastDateStr}</span>
+                            <span className="font-mono">{s.lastOdometer.toLocaleString()} กม.</span>
+                          </div>
+                        </div>
+
+                        {/* Action Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedVehicleFilter === s.vehicleId) {
+                              setSelectedVehicleFilter('all');
+                            } else {
+                              setSelectedVehicleFilter(s.vehicleId);
+                            }
+                          }}
+                          className={`w-full py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1 ${
+                            selectedVehicleFilter === s.vehicleId
+                              ? 'bg-indigo-600 text-white shadow-2xs'
+                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          {selectedVehicleFilter === s.vehicleId ? (
+                            <>
+                              <X className="w-3.5 h-3.5" />
+                              ล้างตัวกรอง (แสดงทั้งหมด)
+                            </>
+                          ) : (
+                            <>
+                              <Eye className="w-3.5 h-3.5 text-slate-500" />
+                              กรองดูประวัติคันนี้
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Detailed Records Log Feed Header */}
+      <div className="flex items-center justify-between pt-2">
+        <div>
+          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+            <ClipboardCheck className="w-5 h-5 text-blue-600" />
+            รายการบันทึกการตรวจเช็คสภาพละเอียด
+            <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-slate-100 text-slate-700">
+              {filteredRecords.length} รายการ
+            </span>
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            ใบบันทึกผลการตรวจเช็คสภาพยานพาหนะพร้อมรายละเอียดรายการตรวจและข้อบกพร่อง
+          </p>
+        </div>
       </div>
 
       {/* Records List */}
