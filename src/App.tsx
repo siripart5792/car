@@ -1080,6 +1080,7 @@ export default function App() {
               window.open(url, '_blank', 'noopener,noreferrer');
             } : undefined}
             isSheetsConnected={isSheetsConnected}
+            onStartInspection={handleStartInspectionForVehicle}
           />
         )}
 
