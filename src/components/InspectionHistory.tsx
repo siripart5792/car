@@ -32,7 +32,8 @@ import {
   ArrowUpDown,
   AlertCircle,
   Clock,
-  Copy
+  Copy,
+  Wrench
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { InspectionRecord, Vehicle, OverallStatus } from '../types/vehicle';
@@ -68,6 +69,18 @@ export interface UninspectedVehicleInfo {
   lastInspector?: string;
   lastStatus?: OverallStatus;
   neverInspected: boolean;
+}
+
+export interface MaintenanceVehicleInfo {
+  vehicle: Vehicle;
+  lastRecord?: InspectionRecord;
+  lastInspectionDateStr: string;
+  lastInspectionTimeStr?: string;
+  lastOdometer: number;
+  lastInspector?: string;
+  lastStatus?: OverallStatus;
+  reason: 'maintenance_status' | 'not_ready_inspection' | 'both';
+  issueDetails?: string;
 }
 
 interface InspectionHistoryProps {
@@ -145,28 +158,30 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
-  // Date filter state
-  const [datePreset, setDatePreset] = useState<string>('all');
-  const [startDate, setStartDate] = useState<string>('');
-  const [endDate, setEndDate] = useState<string>('');
-
-  const [activeRecord, setActiveRecord] = useState<InspectionRecord | null>(null);
-  const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null);
-
-  // Vehicle summary & Excel export state
-  const [summaryTab, setSummaryTab] = useState<'inspected' | 'uninspected'>('inspected');
-  const [summaryViewMode, setSummaryViewMode] = useState<'table' | 'cards'>('table');
-  const [isSummaryCollapsed, setIsSummaryCollapsed] = useState<boolean>(false);
-  const [summarySortBy, setSummarySortBy] = useState<'times' | 'days' | 'plate'>('times');
-  const [isExporting, setIsExporting] = useState<boolean>(false);
-  const [copiedUninspectedLine, setCopiedUninspectedLine] = useState<boolean>(false);
-
   const formatYMD = (d: Date) => {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   };
+
+  const getTodayYMD = () => formatYMD(new Date());
+
+  // Date filter state - default to 'today' (วันนี้)
+  const [datePreset, setDatePreset] = useState<string>('today');
+  const [startDate, setStartDate] = useState<string>(getTodayYMD());
+  const [endDate, setEndDate] = useState<string>(getTodayYMD());
+
+  const [activeRecord, setActiveRecord] = useState<InspectionRecord | null>(null);
+  const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null);
+
+  // Vehicle summary & Excel export state
+  const [summaryTab, setSummaryTab] = useState<'inspected' | 'uninspected' | 'maintenance'>('inspected');
+  const [summaryViewMode, setSummaryViewMode] = useState<'table' | 'cards'>('table');
+  const [isSummaryCollapsed, setIsSummaryCollapsed] = useState<boolean>(false);
+  const [summarySortBy, setSummarySortBy] = useState<'times' | 'days' | 'plate'>('times');
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [copiedUninspectedLine, setCopiedUninspectedLine] = useState<boolean>(false);
 
   const getRecordDateString = (dateStr: string) => {
     if (!dateStr) return '';
@@ -473,6 +488,121 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
     return list.sort((a, b) => a.vehicle.licensePlate.localeCompare(b.vehicle.licensePlate, 'th'));
   }, [vehicles, records, filteredRecords, selectedBranches, selectedCategoryFilter, selectedVehicleFilter, searchTerm]);
 
+  // Vehicles under maintenance or prohibited ('รถที่ส่งซ่อม / ห้ามใช้')
+  const maintenanceVehicles: MaintenanceVehicleInfo[] = useMemo(() => {
+    const latestHistoryMap = new Map<string, InspectionRecord>();
+    const sortedAll = [...records].sort((a, b) => {
+      const tA = new Date(a.inspectionDate).getTime() || 0;
+      const tB = new Date(b.inspectionDate).getTime() || 0;
+      return tB - tA;
+    });
+
+    sortedAll.forEach((rec) => {
+      const vId = rec.vehicleId;
+      const plate = rec.vehicleLicensePlate ? rec.vehicleLicensePlate.trim().toLowerCase() : '';
+      if (vId && !latestHistoryMap.has(vId)) {
+        latestHistoryMap.set(vId, rec);
+      }
+      if (plate && !latestHistoryMap.has(plate)) {
+        latestHistoryMap.set(plate, rec);
+      }
+    });
+
+    const list: MaintenanceVehicleInfo[] = [];
+
+    vehicles.forEach((v) => {
+      // 1. Branch filter
+      if (selectedBranches.length > 0 && !selectedBranches.includes(v.peaBranch || 'กฟภ. สำนักงานใหญ่')) {
+        return;
+      }
+      // 2. Category filter
+      if (selectedCategoryFilter !== 'all' && v.category !== selectedCategoryFilter) {
+        return;
+      }
+      // 3. Vehicle filter
+      if (selectedVehicleFilter !== 'all' && v.id !== selectedVehicleFilter) {
+        return;
+      }
+      // 4. Search term
+      if (searchTerm.trim()) {
+        const term = searchTerm.toLowerCase();
+        const matchPlate = v.licensePlate.toLowerCase().includes(term);
+        const matchBrand = `${v.brand} ${v.model}`.toLowerCase().includes(term);
+        const matchBranch = (v.peaBranch || '').toLowerCase().includes(term);
+        const matchDept = (v.department || '').toLowerCase().includes(term);
+        if (!matchPlate && !matchBrand && !matchBranch && !matchDept) {
+          return;
+        }
+      }
+
+      const lastRec = latestHistoryMap.get(v.id) || latestHistoryMap.get(v.licensePlate.trim().toLowerCase());
+      const isMaintenanceStatus = v.status === 'maintenance';
+      const isNotReadyStatus = lastRec?.overallStatus === 'not_ready';
+
+      // Only include vehicles that are in maintenance status OR whose latest inspection was not_ready
+      if (!isMaintenanceStatus && !isNotReadyStatus) {
+        return;
+      }
+
+      let reason: 'maintenance_status' | 'not_ready_inspection' | 'both' = 'maintenance_status';
+      if (isMaintenanceStatus && isNotReadyStatus) {
+        reason = 'both';
+      } else if (isNotReadyStatus) {
+        reason = 'not_ready_inspection';
+      }
+
+      let lastDateStr = 'ยังไม่มีบันทึกในระบบ';
+      let lastTimeStr = '';
+      let issueDetails = v.notes || '';
+
+      if (lastRec) {
+        try {
+          const d = new Date(lastRec.inspectionDate);
+          if (!isNaN(d.getTime())) {
+            lastDateStr = d.toLocaleDateString('th-TH', {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric',
+            });
+            lastTimeStr = d.toLocaleTimeString('th-TH', {
+              hour: '2-digit',
+              minute: '2-digit',
+            }) + ' น.';
+          } else {
+            lastDateStr = lastRec.inspectionDate.substring(0, 10);
+          }
+        } catch {
+          lastDateStr = lastRec.inspectionDate.substring(0, 10);
+        }
+
+        const failedItems = lastRec.items
+          .filter((i) => i.status === 'fail')
+          .map((i) => i.title + (i.remark ? ` (${i.remark})` : ''))
+          .join(', ');
+
+        if (failedItems) {
+          issueDetails = failedItems;
+        } else if (lastRec.summaryRemarks) {
+          issueDetails = lastRec.summaryRemarks;
+        }
+      }
+
+      list.push({
+        vehicle: v,
+        lastRecord: lastRec,
+        lastInspectionDateStr: lastDateStr,
+        lastInspectionTimeStr: lastTimeStr,
+        lastOdometer: lastRec?.odometer || v.lastOdometer || 0,
+        lastInspector: lastRec?.inspectorName,
+        lastStatus: lastRec?.overallStatus,
+        reason,
+        issueDetails,
+      });
+    });
+
+    return list.sort((a, b) => a.vehicle.licensePlate.localeCompare(b.vehicle.licensePlate, 'th'));
+  }, [vehicles, records, selectedBranches, selectedCategoryFilter, selectedVehicleFilter, searchTerm]);
+
   // Overall statistics for the selected reporting period
   const totalUniqueDaysInPeriod = useMemo(() => {
     const days = new Set<string>();
@@ -489,7 +619,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
 
   // Export to Excel function (.xlsx)
   const handleExportExcel = () => {
-    if (filteredRecords.length === 0 && uninspectedVehicles.length === 0) {
+    if (filteredRecords.length === 0 && uninspectedVehicles.length === 0 && maintenanceVehicles.length === 0) {
       alert('ไม่พบข้อมูลยานพาหนะหรือการตรวจเช็คที่ตรงกับเงื่อนไขสำหรับการส่งออก');
       return;
     }
@@ -604,7 +734,62 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
         XLSX.utils.book_append_sheet(wb, wsUninspected, 'รถที่ยังไม่ตรวจสภาพ');
       }
 
-      // Sheet 3: รายละเอียดการตรวจเช็คย้อนหลัง (Detailed Log)
+      // Sheet 3: รายชื่อรถที่ส่งซ่อมหรือห้ามปฏิบัติงาน (Maintenance & Prohibited Vehicles)
+      if (maintenanceVehicles.length > 0) {
+        const maintenanceRows = maintenanceVehicles.map((m, idx) => ({
+          'ลำดับ': idx + 1,
+          'ทะเบียนรถ': m.vehicle.licensePlate,
+          'ยี่ห้อ - รุ่น': `${m.vehicle.brand} ${m.vehicle.model}`.trim(),
+          'การไฟฟ้าสังกัด': m.vehicle.peaBranch || 'กฟภ. สำนักงานใหญ่',
+          'กลุ่มประเภทรถ':
+            m.vehicle.category === 'bucket_truck_class_c'
+              ? '3. รถกระเช้า Class C'
+              : m.vehicle.category === 'crane_truck'
+              ? '2. รถบรรทุกติดเครนไฮดรอลิค'
+              : '1. ยานพาหนะทั่วไป',
+          'สังกัด/แผนก': m.vehicle.department || '-',
+          'สถานะปัจจุบัน':
+            m.reason === 'both'
+              ? 'ส่งซ่อมบำรุง & ห้ามปฏิบัติงาน'
+              : m.reason === 'maintenance_status'
+              ? 'ส่งซ่อม / ระงับใช้'
+              : 'ห้ามปฏิบัติงาน',
+          'รายละเอียดข้อบกพร่อง/สาเหตุ': m.issueDetails || '-',
+          'ตรวจล่าสุดในระบบ': m.lastInspectionDateStr,
+          'เวลาตรวจล่าสุด': m.lastInspectionTimeStr || '-',
+          'เลขไมล์ล่าสุด (กม.)': m.lastOdometer || 0,
+          'ผู้ตรวจล่าสุด': m.lastInspector || '-',
+          'ผลตรวจล่าสุด': m.lastStatus
+            ? m.lastStatus === 'ready'
+              ? 'พร้อมใช้งาน'
+              : m.lastStatus === 'conditional'
+              ? 'มีข้อสังเกต'
+              : m.lastStatus === 'not_ready'
+              ? 'ห้ามปฏิบัติงาน'
+              : 'ไม่มีการใช้งานในวันนี้'
+            : 'ยังไม่เคยตรวจ',
+        }));
+
+        const wsMaintenance = XLSX.utils.json_to_sheet(maintenanceRows);
+        wsMaintenance['!cols'] = [
+          { wch: 6 },
+          { wch: 14 },
+          { wch: 20 },
+          { wch: 24 },
+          { wch: 24 },
+          { wch: 20 },
+          { wch: 28 },
+          { wch: 35 },
+          { wch: 22 },
+          { wch: 16 },
+          { wch: 18 },
+          { wch: 22 },
+          { wch: 20 },
+        ];
+        XLSX.utils.book_append_sheet(wb, wsMaintenance, 'รถที่ส่งซ่อม-ห้ามใช้');
+      }
+
+      // Sheet 4: รายละเอียดการตรวจเช็คย้อนหลัง (Detailed Log)
       if (filteredRecords.length > 0) {
         const detailRows = filteredRecords.map((r, idx) => {
           let dateStr = '-';
@@ -1140,8 +1325,8 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
       </div>
 
       {/* Overview KPI Cards for Selected Reporting Period */}
-      {(filteredRecords.length > 0 || uninspectedVehicles.length > 0) && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+      {(filteredRecords.length > 0 || uninspectedVehicles.length > 0 || maintenanceVehicles.length > 0) && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
           {/* Card 1: Inspected count */}
           <button
             type="button"
@@ -1214,7 +1399,48 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
             </div>
           </button>
 
-          {/* Card 3: Days with inspections */}
+          {/* Card 3: Maintenance / Prohibited count */}
+          <button
+            type="button"
+            onClick={() => {
+              setSummaryTab('maintenance');
+              setIsSummaryCollapsed(false);
+            }}
+            className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+              summaryTab === 'maintenance' && !isSummaryCollapsed
+                ? 'bg-rose-50/90 border-rose-300 ring-2 ring-rose-500/20 shadow-xs'
+                : maintenanceVehicles.length > 0
+                ? 'bg-rose-50/40 border-rose-200 hover:border-rose-300 hover:shadow-xs'
+                : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-xs'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                  maintenanceVehicles.length > 0
+                    ? 'bg-rose-100 text-rose-700'
+                    : 'bg-slate-100 text-slate-500'
+                }`}
+              >
+                <Wrench className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[11px] font-semibold text-slate-500 block truncate">
+                  ส่งซ่อม/ห้ามใช้
+                </span>
+                <div
+                  className={`text-lg font-bold ${
+                    maintenanceVehicles.length > 0 ? 'text-rose-900' : 'text-slate-700'
+                  }`}
+                >
+                  {maintenanceVehicles.length}{' '}
+                  <span className="text-xs font-normal text-slate-500">คัน</span>
+                </div>
+              </div>
+            </div>
+          </button>
+
+          {/* Card 4: Days with inspections */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
               <CalendarDays className="w-5 h-5" />
@@ -1228,7 +1454,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
             </div>
           </div>
 
-          {/* Card 4: Total inspection count */}
+          {/* Card 5: Total inspection count */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
               <ClipboardCheck className="w-5 h-5" />
@@ -1242,7 +1468,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
             </div>
           </div>
 
-          {/* Card 5: Result status breakdown */}
+          {/* Card 6: Result status breakdown */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3 col-span-2 sm:col-span-1">
             <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
               <BarChart3 className="w-5 h-5" />
@@ -1264,7 +1490,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
       )}
 
       {/* Vehicle Inspection Frequency & Status Summary */}
-      {(filteredRecords.length > 0 || uninspectedVehicles.length > 0) && (
+      {(filteredRecords.length > 0 || uninspectedVehicles.length > 0 || maintenanceVehicles.length > 0) && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden transition-all">
           {/* Section Header */}
           <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-gradient-to-r from-slate-50/80 to-white">
@@ -1278,11 +1504,11 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
                     สรุปสถานะและการตรวจเช็ครายคันตามช่วงเวลา
                   </h3>
                   <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                    รวม {vehicleSummaries.length + uninspectedVehicles.length} คัน
+                    รวม {vehicleSummaries.length + uninspectedVehicles.length + maintenanceVehicles.length} คัน
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  ตรวจสอบความถี่การตรวจของรถแต่ละคัน (ตรวจกี่วัน ตรวจกี่ครั้ง) และดูรถที่ยังไม่ได้รับการตรวจสภาพ
+                  ตรวจสอบความถี่การตรวจของรถแต่ละคัน (ตรวจกี่วัน ตรวจกี่ครั้ง) รถที่ยังไม่ตรวจสภาพ และรถที่ส่งซ่อม/ห้ามใช้
                 </p>
               </div>
             </div>
@@ -1369,7 +1595,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
               <button
                 type="button"
                 onClick={handleExportExcel}
-                disabled={(filteredRecords.length === 0 && uninspectedVehicles.length === 0) || isExporting}
+                disabled={(filteredRecords.length === 0 && uninspectedVehicles.length === 0 && maintenanceVehicles.length === 0) || isExporting}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-xs transition-all cursor-pointer"
                 title="ส่งออกรายงานและสถิตินี้เป็น Excel (.xlsx)"
               >
@@ -1389,9 +1615,9 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
             </div>
           </div>
 
-          {/* Subheader Tabs: ตรวจแล้วในรอบนี้ vs ยังไม่ได้ตรวจสภาพ */}
+          {/* Subheader Tabs: ตรวจแล้วในรอบนี้ vs ยังไม่ได้ตรวจสภาพ vs รถที่ส่งซ่อม/ห้ามใช้ */}
           <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <button
                 type="button"
                 onClick={() => {
@@ -1453,6 +1679,43 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
                   {uninspectedVehicles.length}
                 </span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSummaryTab('maintenance');
+                  setIsSummaryCollapsed(false);
+                }}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  summaryTab === 'maintenance'
+                    ? 'bg-rose-600 text-white shadow-xs border border-rose-700 ring-2 ring-rose-500/20'
+                    : maintenanceVehicles.length > 0
+                    ? 'bg-rose-100/80 text-rose-900 border border-rose-300 hover:bg-rose-100'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/80 border border-transparent'
+                }`}
+              >
+                <Wrench
+                  className={`w-3.5 h-3.5 ${
+                    summaryTab === 'maintenance'
+                      ? 'text-white'
+                      : maintenanceVehicles.length > 0
+                      ? 'text-rose-700'
+                      : 'text-slate-500'
+                  }`}
+                />
+                <span>รถที่ส่งซ่อม/ห้ามใช้</span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                    summaryTab === 'maintenance'
+                      ? 'bg-white/30 text-white'
+                      : maintenanceVehicles.length > 0
+                      ? 'bg-rose-200 text-rose-950 ring-1 ring-rose-300'
+                      : 'bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  {maintenanceVehicles.length}
+                </span>
+              </button>
             </div>
 
             <div className="flex items-center gap-3 text-[11px] text-slate-500 font-medium">
@@ -1460,7 +1723,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
                 <span>
                   แสดงรถที่บันทึกผลตรวจแล้ว <strong className="text-slate-800 font-semibold">{vehicleSummaries.length}</strong> คัน
                 </span>
-              ) : (
+              ) : summaryTab === 'uninspected' ? (
                 <div className="flex items-center gap-2 flex-wrap">
                   <span>
                     แสดงรถที่ยังไม่มีการตรวจสภาพ <strong className="text-amber-800 font-bold">{uninspectedVehicles.length}</strong> คัน
@@ -1490,6 +1753,12 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
                       )}
                     </button>
                   )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span>
+                    แสดงรถที่ส่งซ่อมหรือห้ามปฏิบัติงาน <strong className="text-rose-800 font-bold">{maintenanceVehicles.length}</strong> คัน
+                  </span>
                 </div>
               )}
             </div>
@@ -1955,6 +2224,274 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
                           <span>ตรวจเช็คสภาพคันนี้ทันที</span>
                         </button>
                       )}
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+
+            {/* TAB 3: Maintenance Vehicles (รถที่ส่งซ่อม/ห้ามใช้) */}
+            {summaryTab === 'maintenance' && (
+              maintenanceVehicles.length === 0 ? (
+                <div className="p-8 text-center bg-emerald-50/60 rounded-xl border border-dashed border-emerald-300">
+                  <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-2" />
+                  <h4 className="text-sm font-bold text-emerald-900">ไม่มีรถที่อยู่ในสถานะส่งซ่อมหรือห้ามใช้</h4>
+                  <p className="text-xs text-emerald-700 mt-1">
+                    ยานพาหนะทุกคันในระบบพร้อมใช้งานตามปกติ ไม่มีรถคันใดระงับใช้หรือมีผลตรวจไม่พร้อมใช้งาน
+                  </p>
+                </div>
+              ) : summaryViewMode === 'table' ? (
+                /* Maintenance Table View */
+                <div className="overflow-x-auto border border-rose-200/80 rounded-xl">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-rose-50 text-rose-950 font-bold border-b border-rose-200">
+                        <th className="py-2.5 px-3 text-center w-12">ลำดับ</th>
+                        <th className="py-2.5 px-3.5">ทะเบียนรถ</th>
+                        <th className="py-2.5 px-3.5">ยี่ห้อ - รุ่น</th>
+                        <th className="py-2.5 px-3.5">การไฟฟ้าสังกัด</th>
+                        <th className="py-2.5 px-3.5">กลุ่มประเภทรถ</th>
+                        <th className="py-2.5 px-3.5">สังกัด/แผนก</th>
+                        <th className="py-2.5 px-3.5 text-center">สาเหตุ / สถานะ</th>
+                        <th className="py-2.5 px-3.5">บันทึกล่าสุดในระบบ</th>
+                        <th className="py-2.5 px-3 text-right">เลขไมล์</th>
+                        <th className="py-2.5 px-3.5">รายละเอียดข้อบกพร่อง / สาเหตุ</th>
+                        <th className="py-2.5 px-3.5 text-center w-36">ดำเนินการ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-rose-100/70">
+                      {maintenanceVehicles.map((m, idx) => (
+                        <tr key={m.vehicle.id} className="hover:bg-rose-50/40 transition-colors">
+                          <td className="py-3 px-3 text-center text-slate-400 font-mono">
+                            {idx + 1}
+                          </td>
+                          <td className="py-3 px-3.5">
+                            <span className="px-2 py-0.5 bg-slate-900 text-white font-mono font-bold text-xs rounded-md shadow-2xs">
+                              {m.vehicle.licensePlate}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3.5 font-bold text-slate-800">
+                            {m.vehicle.brand} {m.vehicle.model}
+                          </td>
+                          <td className="py-3 px-3.5">
+                            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-md font-semibold text-[11px]">
+                              ⚡ {m.vehicle.peaBranch || 'กฟภ. สำนักงานใหญ่'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3.5 text-slate-600">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                              m.vehicle.category === 'bucket_truck_class_c'
+                                ? 'bg-purple-50 text-purple-800 border-purple-200'
+                                : m.vehicle.category === 'crane_truck'
+                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                : 'bg-blue-50 text-blue-700 border-blue-200'
+                            }`}>
+                              {m.vehicle.category === 'bucket_truck_class_c'
+                                ? '3. รถกระเช้า Class C'
+                                : m.vehicle.category === 'crane_truck'
+                                ? '2. รถติดเครน'
+                                : '1. รถทั่วไป'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3.5 text-slate-600">
+                            {m.vehicle.department || '-'}
+                          </td>
+                          <td className="py-3 px-3.5 text-center">
+                            {m.reason === 'both' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-rose-100 text-rose-800 border border-rose-300 rounded-full text-[11px] font-bold">
+                                <Wrench className="w-3 h-3 text-rose-600" />
+                                ส่งซ่อม & ห้ามใช้
+                              </span>
+                            ) : m.reason === 'not_ready_inspection' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-red-100 text-red-800 border border-red-300 rounded-full text-[11px] font-bold">
+                                <XCircle className="w-3 h-3 text-red-600" />
+                                ไม่พร้อมปฏิบัติงาน
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-orange-100 text-orange-800 border border-orange-300 rounded-full text-[11px] font-bold">
+                                <Wrench className="w-3 h-3 text-orange-600" />
+                                ส่งซ่อม/ระงับใช้
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3.5">
+                            {m.lastRecord ? (
+                              <div>
+                                <div className="text-[11px] font-medium text-slate-800 flex items-center gap-1">
+                                  <Clock className="w-3 h-3 text-slate-400" />
+                                  {m.lastInspectionDateStr} {m.lastInspectionTimeStr}
+                                </div>
+                                <div className="text-[10px] text-slate-500">
+                                  {m.lastInspector ? `โดย ${m.lastInspector}` : ''}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">
+                                ยังไม่มีบันทึกในระบบ
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-right font-mono font-medium text-slate-700">
+                            {m.lastOdometer > 0 ? `${m.lastOdometer.toLocaleString()} กม.` : '-'}
+                          </td>
+                          <td className="py-3 px-3.5 max-w-xs">
+                            <p className="text-xs text-rose-900 font-medium truncate" title={m.issueDetails || 'ระงับการใช้งานเพื่อตรวจสอบ/ซ่อมแซม'}>
+                              {m.issueDetails || 'ระงับการใช้งานเพื่อตรวจสอบ/ซ่อมแซม'}
+                            </p>
+                          </td>
+                          <td className="py-3 px-3.5 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (selectedVehicleFilter === m.vehicle.id) {
+                                    setSelectedVehicleFilter('all');
+                                  } else {
+                                    setSelectedVehicleFilter(m.vehicle.id);
+                                  }
+                                }}
+                                className={`px-2 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                                  selectedVehicleFilter === m.vehicle.id
+                                    ? 'bg-rose-600 text-white shadow-2xs'
+                                    : 'bg-white border border-rose-200 text-rose-800 hover:bg-rose-50'
+                                }`}
+                                title="กรองดูประวัติการตรวจเช็คย้อนหลังของคันนี้"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>{selectedVehicleFilter === m.vehicle.id ? 'ล้างกรอง' : 'ดูประวัติ'}</span>
+                              </button>
+                              {onStartInspection && (
+                                <button
+                                  type="button"
+                                  onClick={() => onStartInspection(m.vehicle.id)}
+                                  className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold shadow-2xs transition-all flex items-center gap-1 cursor-pointer"
+                                  title="ตรวจเช็คสภาพใหม่/อัปเดตสภาพ"
+                                >
+                                  <ClipboardCheck className="w-3.5 h-3.5" />
+                                  <span>ตรวจใหม่</span>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                /* Maintenance Cards View */
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {maintenanceVehicles.map((m) => (
+                    <div
+                      key={m.vehicle.id}
+                      className="p-4 rounded-2xl border border-rose-200 bg-rose-50/20 hover:bg-rose-50/40 hover:border-rose-300 transition-all flex flex-col justify-between gap-3 shadow-xs"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="px-2.5 py-0.5 bg-slate-900 text-white font-mono font-bold text-xs rounded-lg shadow-2xs">
+                            {m.vehicle.licensePlate}
+                          </span>
+                          <span className="px-2 py-0.5 bg-indigo-50 text-indigo-800 border border-indigo-200 rounded-md font-semibold text-[11px] truncate">
+                            ⚡ {m.vehicle.peaBranch || 'กฟภ. สำนักงานใหญ่'}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 font-bold text-slate-800 text-sm">
+                          {m.vehicle.brand} {m.vehicle.model}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            m.vehicle.category === 'bucket_truck_class_c'
+                              ? 'bg-purple-50 text-purple-800 border-purple-200'
+                              : m.vehicle.category === 'crane_truck'
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>
+                            {m.vehicle.category === 'bucket_truck_class_c'
+                              ? '3. รถกระเช้า Class C'
+                              : m.vehicle.category === 'crane_truck'
+                              ? '2. รถติดเครน'
+                              : '1. รถทั่วไป'}
+                          </span>
+                          {m.vehicle.department && (
+                            <span className="text-[11px] text-slate-500 truncate">
+                              • {m.vehicle.department}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Reason & Defect Box */}
+                      <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl space-y-1.5">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-900">
+                            {m.reason === 'both' ? (
+                              <>
+                                <Wrench className="w-3.5 h-3.5 text-rose-600" />
+                                ส่งซ่อม & ห้ามใช้
+                              </>
+                            ) : m.reason === 'not_ready_inspection' ? (
+                              <>
+                                <XCircle className="w-3.5 h-3.5 text-red-600" />
+                                ไม่พร้อมปฏิบัติงาน
+                              </>
+                            ) : (
+                              <>
+                                <Wrench className="w-3.5 h-3.5 text-orange-600" />
+                                ส่งซ่อม/ระงับใช้
+                              </>
+                            )}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-500">
+                            {m.lastOdometer > 0 ? `${m.lastOdometer.toLocaleString()} กม.` : ''}
+                          </span>
+                        </div>
+                        {m.issueDetails && (
+                          <p className="text-xs text-rose-800 bg-white/70 p-2 rounded-lg border border-rose-100 leading-relaxed font-medium">
+                            {m.issueDetails}
+                          </p>
+                        )}
+                        <div className="text-[10px] text-slate-500 pt-0.5">
+                          {m.lastRecord ? (
+                            <span>บันทึกล่าสุด: {m.lastInspectionDateStr} {m.lastInspectionTimeStr} {m.lastInspector ? `(${m.lastInspector})` : ''}</span>
+                          ) : (
+                            <span>ยังไม่มีประวัติตรวจเช็คในระบบ</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedVehicleFilter === m.vehicle.id) {
+                              setSelectedVehicleFilter('all');
+                            } else {
+                              setSelectedVehicleFilter(m.vehicle.id);
+                            }
+                          }}
+                          className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                            selectedVehicleFilter === m.vehicle.id
+                              ? 'bg-rose-600 text-white shadow-2xs'
+                              : 'bg-white border border-rose-200 text-rose-800 hover:bg-rose-50'
+                          }`}
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>{selectedVehicleFilter === m.vehicle.id ? 'แสดงทั้งหมด' : 'ประวัติคันนี้'}</span>
+                        </button>
+                        {onStartInspection ? (
+                          <button
+                            type="button"
+                            onClick={() => onStartInspection(m.vehicle.id)}
+                            className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold shadow-2xs transition-all cursor-pointer"
+                          >
+                            <ClipboardCheck className="w-3.5 h-3.5" />
+                            <span>ตรวจสภาพใหม่</span>
+                          </button>
+                        ) : (
+                          <div />
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
