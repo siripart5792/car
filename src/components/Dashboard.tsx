@@ -153,26 +153,62 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
     const systemUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : '';
 
+    // Group pending vehicles by PEA Branch -> Department
+    const branchMap = new Map<string, Map<string, Vehicle[]>>();
+    pendingVehiclesToday.forEach((v) => {
+      const branch = v.peaBranch || 'กฟภ. สำนักงานใหญ่';
+      const rawDept = (v.department || '').trim();
+      const dept = rawDept && rawDept !== '-' && rawDept.toLowerCase() !== 'n/a' ? rawDept : 'ไม่ระบุแผนก';
+      if (!branchMap.has(branch)) {
+        branchMap.set(branch, new Map<string, Vehicle[]>());
+      }
+      const deptMap = branchMap.get(branch)!;
+      if (!deptMap.has(dept)) {
+        deptMap.set(dept, []);
+      }
+      deptMap.get(dept)!.push(v);
+    });
+
+    const formatDeptHeader = (deptName: string) => {
+      if (deptName === 'ไม่ระบุแผนก') return '📂 ไม่ระบุแผนก';
+      if (deptName.startsWith('แผนก')) return `📂 ${deptName}`;
+      return `📂 แผนก ${deptName}`;
+    };
+
+    const groupedTextLines: string[] = [];
+    branchMap.forEach((deptMap, branchName) => {
+      const branchTotal = Array.from(deptMap.values()).reduce((sum, list) => sum + list.length, 0);
+      groupedTextLines.push(`⚡ ${branchName} (ค้างตรวจ ${branchTotal} คัน)`);
+      deptMap.forEach((vList, deptName) => {
+        groupedTextLines.push(`  ${formatDeptHeader(deptName)} (${vList.length} คัน)`);
+        vList.forEach((v, idx) => {
+          groupedTextLines.push(`    ${idx + 1}. ทะเบียน ${v.licensePlate} (${v.brand} ${v.model})`);
+        });
+        groupedTextLines.push(``);
+      });
+    });
+
+    // Remove trailing empty line if any
+    while (groupedTextLines.length > 0 && groupedTextLines[groupedTextLines.length - 1] === '') {
+      groupedTextLines.pop();
+    }
+
     const textLines = [
-      `📢 สรุปรายชื่อยานพาหนะที่ "ยังไม่ได้ตรวจสภาพก่อนปฏิบัติงาน" ประจำวัน (${branchTitle}):`,
-      `📅 วันที่: ${formattedTodayDate}`,
+      `📢 แจ้งเตือน: ยานพาหนะที่ "ยังไม่ได้ตรวจสภาพก่อนปฏิบัติงาน"`,
+      `📅 ประจำวัน: ${formattedTodayDate}`,
+      `🏢 การไฟฟ้า: ${branchTitle}`,
       `⚠️ ค้างตรวจทั้งหมด: ${pendingVehiclesToday.length} คัน (จาก ${displayedVehicles.length} คัน)`,
-      `----------------------------------------`,
-      ...pendingVehiclesToday.map((v, i) => {
-        const catName =
-          v.category === 'bucket_truck_class_c'
-            ? 'รถกระเช้า Class C'
-            : v.category === 'crane_truck'
-            ? 'รถบรรทุกติดเครน'
-            : 'ทั่วไป';
-        return `${i + 1}. [${v.peaBranch || 'กฟภ.'}] ทะเบียน ${v.licensePlate} (${v.brand} ${v.model}) [${catName}] - ${v.department}`;
-      }),
-      `----------------------------------------`,
-      `*กรุณาตรวจสภาพรถตามแบบฟอร์มก่อนนำรถออกปฏิบัติงาน เพื่อความปลอดภัยสูงสุด*`,
+      `   (ไม่รวมรถสถานะส่งซ่อม / ห้ามปฏิบัติงาน)`,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      ``,
+      ...groupedTextLines,
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `*ขอความร่วมมือผู้ขับขี่/ผู้ควบคุมรถ ดำเนินการตรวจสภาพตามแบบฟอร์มก่อนนำรถออกปฏิบัติงาน เพื่อความปลอดภัยสูงสุด*`,
       ...(systemUrl
         ? [
             ``,
-            `🔗 เข้าสู่ระบบตรวจสภาพยานพาหนะได้ที่:`,
+            `🔗 เข้าสู่ระบบตรวจสภาพยานพาหนะ PEA ได้ที่:`,
             systemUrl,
           ]
         : []),

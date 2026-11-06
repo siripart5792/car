@@ -902,43 +902,97 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
         ? selectedBranches[0]
         : `${selectedBranches.join(', ')} (${selectedBranches.length} การไฟฟ้า)`;
 
-    const periodLabel =
-      startDate || endDate
-        ? `ช่วงวันที่ ${startDate || 'เริ่มต้น'} ถึง ${endDate || 'ปัจจุบัน'}`
-        : datePreset === 'today'
-        ? 'ประจำวันนี้'
-        : datePreset === 'yesterday'
-        ? 'ประจำเมื่อวาน'
-        : datePreset === 'last7'
-        ? '7 วันล่าสุด'
-        : datePreset === 'last30'
-        ? '30 วันล่าสุด'
-        : datePreset === 'this_month'
-        ? 'เดือนนี้'
-        : 'ทั้งหมด';
+    let periodLabel = '';
+    if (startDate && endDate) {
+      if (startDate === endDate) {
+        periodLabel = `ประจำวันที่ ${startDate}`;
+      } else {
+        periodLabel = `ช่วงวันที่ ${startDate} ถึง ${endDate}`;
+      }
+    } else if (startDate) {
+      periodLabel = `ตั้งแต่วันที่ ${startDate} เป็นต้นไป`;
+    } else if (endDate) {
+      periodLabel = `ถึงวันที่ ${endDate}`;
+    } else if (datePreset === 'today') {
+      periodLabel = 'ประจำวันนี้';
+    } else if (datePreset === 'yesterday') {
+      periodLabel = 'ประจำเมื่อวาน';
+    } else if (datePreset === 'last7') {
+      periodLabel = '7 วันล่าสุด';
+    } else if (datePreset === 'last30') {
+      periodLabel = '30 วันล่าสุด';
+    } else if (datePreset === 'this_month') {
+      periodLabel = 'ประจำเดือนนี้';
+    } else {
+      periodLabel = 'ทุกช่วงเวลา';
+    }
+
+    const now = new Date();
+    const thaiDateToday = now.toLocaleDateString('th-TH', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
 
     const systemUrl = typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : '';
 
+    // Group uninspected vehicles by PEA Branch -> Department
+    const branchMap = new Map<string, Map<string, Vehicle[]>>();
+    uninspectedVehicles.forEach((u) => {
+      const v = u.vehicle;
+      const branch = v.peaBranch || 'กฟภ. สำนักงานใหญ่';
+      const rawDept = (v.department || '').trim();
+      const dept = rawDept && rawDept !== '-' && rawDept.toLowerCase() !== 'n/a' ? rawDept : 'ไม่ระบุแผนก';
+      if (!branchMap.has(branch)) {
+        branchMap.set(branch, new Map<string, Vehicle[]>());
+      }
+      const deptMap = branchMap.get(branch)!;
+      if (!deptMap.has(dept)) {
+        deptMap.set(dept, []);
+      }
+      deptMap.get(dept)!.push(v);
+    });
+
+    const formatDeptHeader = (deptName: string) => {
+      if (deptName === 'ไม่ระบุแผนก') return '📂 ไม่ระบุแผนก';
+      if (deptName.startsWith('แผนก')) return `📂 ${deptName}`;
+      return `📂 แผนก ${deptName}`;
+    };
+
+    const groupedTextLines: string[] = [];
+    branchMap.forEach((deptMap, branchName) => {
+      const branchTotal = Array.from(deptMap.values()).reduce((sum, list) => sum + list.length, 0);
+      groupedTextLines.push(`⚡ ${branchName} (ค้างตรวจ ${branchTotal} คัน)`);
+      deptMap.forEach((vList, deptName) => {
+        groupedTextLines.push(`  ${formatDeptHeader(deptName)} (${vList.length} คัน)`);
+        vList.forEach((v, idx) => {
+          groupedTextLines.push(`    ${idx + 1}. ทะเบียน ${v.licensePlate} (${v.brand} ${v.model})`);
+        });
+        groupedTextLines.push(``);
+      });
+    });
+
+    // Remove trailing empty line if any
+    while (groupedTextLines.length > 0 && groupedTextLines[groupedTextLines.length - 1] === '') {
+      groupedTextLines.pop();
+    }
+
     const lines = [
-      `📢 รายชื่อยานพาหนะที่ "ยังไม่ได้รับการตรวจสภาพ" (${branchLabel}):`,
-      `📅 รอบรายงาน: ${periodLabel}`,
-      `⚠️ ยังไม่ตรวจ: ${uninspectedVehicles.length} คัน (ไม่รวมรถส่งซ่อม/ห้ามปฏิบัติงาน)`,
-      `----------------------------------------`,
-      ...uninspectedVehicles.map((u, i) => {
-        const catName =
-          u.vehicle.category === 'bucket_truck_class_c'
-            ? 'รถกระเช้า Class C'
-            : u.vehicle.category === 'crane_truck'
-            ? 'รถบรรทุกติดเครน'
-            : 'ทั่วไป';
-        return `${i + 1}. [${u.vehicle.peaBranch || 'กฟภ.'}] ทะเบียน ${u.vehicle.licensePlate} (${u.vehicle.brand} ${u.vehicle.model}) [${catName}] - ${u.vehicle.department || '-'}`;
-      }),
-      `----------------------------------------`,
-      `*กรุณาตรวจสภาพรถตามแบบฟอร์มก่อนนำรถออกปฏิบัติงาน เพื่อความปลอดภัยสูงสุด*`,
+      `📢 แจ้งเตือน: ยานพาหนะที่ "ยังไม่ได้รับการตรวจสภาพ"`,
+      `📅 รอบรายงาน: ${periodLabel} (${thaiDateToday})`,
+      `🏢 การไฟฟ้า: ${branchLabel}`,
+      `⚠️ ค้างตรวจทั้งหมด: ${uninspectedVehicles.length} คัน (ไม่รวมรถส่งซ่อม/ห้ามปฏิบัติงาน)`,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      ``,
+      ...groupedTextLines,
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━`,
+      `*ขอความร่วมมือผู้ขับขี่/ผู้ควบคุมรถ ดำเนินการตรวจสภาพตามแบบฟอร์มก่อนนำรถออกปฏิบัติงาน เพื่อความปลอดภัยสูงสุด*`,
       ...(systemUrl
         ? [
             ``,
-            `🔗 เข้าสู่ระบบตรวจสภาพยานพาหนะได้ที่:`,
+            `🔗 เข้าสู่ระบบตรวจสภาพยานพาหนะ PEA ได้ที่:`,
             systemUrl,
           ]
         : []),
