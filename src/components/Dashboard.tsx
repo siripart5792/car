@@ -505,7 +505,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             ศูนย์ควบคุมความพร้อมยานพาหนะ
           </h1>
           <p className="mt-2 text-sm text-blue-100/80 leading-relaxed">
-            ระบบตรวจเช็คสภาพยานพาหนะประจำวัน แบ่งเป็น 3 ประเภท: ทั่วไป, รถเครน และรถกระเช้า Class C พร้อมบันทึกประวัติและซิงค์ Google Sheets
+            ระบบตรวจเช็คสภาพยานพาหนะประจำวัน
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
