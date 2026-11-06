@@ -173,7 +173,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
     }
     if (failCount === 0) {
       setOverallStatus('ready');
-    } else if (failCount <= 2) {
+    } else if (failCount <= 7) {
       setOverallStatus('conditional');
     } else {
       setOverallStatus('not_ready');
@@ -390,7 +390,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
             type="button"
             onClick={() => {
               setIsNotInUseToday(false);
-              setOverallStatus(failCount > 0 ? 'conditional' : 'ready');
+              setOverallStatus(failCount > 7 ? 'not_ready' : failCount > 0 ? 'conditional' : 'ready');
             }}
             className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all ${
               !isNotInUseToday
@@ -774,14 +774,35 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
 
       {/* Overall Safety Evaluation */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-        <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-          {isNotInUseToday ? (
-            <PauseCircle className="w-5 h-5 text-slate-600" />
-          ) : (
-            <ShieldCheck className="w-5 h-5 text-blue-600" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+            {isNotInUseToday ? (
+              <PauseCircle className="w-5 h-5 text-slate-600" />
+            ) : (
+              <ShieldCheck className="w-5 h-5 text-blue-600" />
+            )}
+            {isNotInUseToday ? 'สถานะความพร้อมของยานพาหนะ' : 'การประเมินผลความพร้อมของยานพาหนะก่อนออกปฏิบัติงาน'}
+          </h3>
+          {!isNotInUseToday && failCount > 0 && (
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
+              failCount > 7
+                ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                : 'bg-amber-100 text-amber-800 border border-amber-300'
+            }`}>
+              {failCount > 7 ? (
+                <>
+                  <XCircle className="w-3.5 h-3.5 text-rose-600" />
+                  <span>พบผิดปกติ {failCount} ข้อ (มากกว่า 7 รายการ ปรับเป็นไม่พร้อมใช้งาน)</span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                  <span>พบผิดปกติ {failCount} ข้อ (1-7 รายการ ปรับเป็นมีข้อสังเกต)</span>
+                </>
+              )}
+            </span>
           )}
-          {isNotInUseToday ? 'สถานะความพร้อมของยานพาหนะ' : 'การประเมินผลความพร้อมของยานพาหนะก่อนออกปฏิบัติงาน'}
-        </h3>
+        </div>
 
         {isNotInUseToday ? (
           <div className="p-4 rounded-2xl border-2 border-slate-300 bg-slate-50/80 flex items-center gap-3.5">
@@ -843,7 +864,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
               </div>
               <span className="font-bold text-sm">พร้อมใช้งานแบบมีข้อสังเกต</span>
               <span className="text-xs text-slate-500 mt-1">
-                ใช้งานได้ชั่วคราว มีจุดต้องเฝ้าระวังหรือสั่งซ่อมในวัน
+                ใช้งานได้ชั่วคราว มีจุดผิดปกติ 1-7 ข้อ (เฝ้าระวังหรือสั่งซ่อม)
               </span>
             </label>
 
@@ -868,7 +889,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
               </div>
               <span className="font-bold text-sm">ไม่พร้อมใช้งาน (ห้ามขับ/ห้ามยก)</span>
               <span className="text-xs text-slate-500 mt-1">
-                มีข้อบกพร่องร้ายแรงต่อความปลอดภัย ต้องส่งซ่อมทันที
+                มีจุดผิดปกติมากกว่า 7 ข้อ หรือมีข้อบกพร่องร้ายแรง (ต้องส่งซ่อม)
               </span>
             </label>
           </div>
