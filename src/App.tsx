@@ -119,7 +119,19 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [fetchDays, setFetchDays] = useState<InspectionFetchDays>(() => getSavedFetchDays());
   const fetchDaysRef = useRef<InspectionFetchDays>(fetchDays);
+  const activeTabRef = useRef<TabType>(activeTab);
+  const isAdminRef = useRef<boolean>(isAdmin);
   const lastPullTimeRef = useRef<number>(0);
+  const lastAutoUpgradeAttemptRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  useEffect(() => {
+    isAdminRef.current = isAdmin;
+  }, [isAdmin]);
+
   const [loadedRangeInfo, setLoadedRangeInfo] = useState<{
     days: InspectionFetchDays;
     startDate?: string;
@@ -127,7 +139,7 @@ export default function App() {
     totalInSheet?: number;
     serverFiltered?: boolean;
   }>(() => {
-    const initialDays = getSavedFetchDays();
+    const initialDays: InspectionFetchDays = !isAdmin ? 7 : getSavedFetchDays();
     const range = computeDateRangeFromDays(initialDays);
     return {
       days: initialDays,
@@ -171,7 +183,17 @@ export default function App() {
       return;
     }
 
-    const activeDays = overrideDays !== undefined ? overrideDays : fetchDaysRef.current;
+    // For general users on Dashboard or Inspection Form, limit Google Sheets pull to the latest 7 days for fast loading
+    const isGeneralQuickPage =
+      !isAdminRef.current &&
+      (activeTabRef.current === 'dashboard' || activeTabRef.current === 'inspect');
+
+    const activeDays: InspectionFetchDays =
+      overrideDays !== undefined
+        ? overrideDays
+        : isGeneralQuickPage
+        ? 7
+        : fetchDaysRef.current;
     const range = computeDateRangeFromDays(activeDays);
 
     setIsFetchingFromSheets(true);
@@ -397,6 +419,31 @@ export default function App() {
       window.removeEventListener('focus', handleVisibilityChange);
     };
   }, [handlePullFromSheets]);
+
+  // 1.0.1 When switching to History/Admin or logging in as Admin, ensure configured fetchDays range is loaded if currently limited to 7 days
+  useEffect(() => {
+    const needsConfiguredRange =
+      isAdmin || (activeTab !== 'dashboard' && activeTab !== 'inspect');
+    if (!needsConfiguredRange) {
+      lastAutoUpgradeAttemptRef.current = null;
+      return;
+    }
+    if (isFetchingFromSheets) return;
+
+    const currentLoaded = loadedRangeInfo.days;
+    const isLoadedNarrower =
+      currentLoaded !== 'all' &&
+      (fetchDays === 'all' || currentLoaded < fetchDays);
+
+    if (isLoadedNarrower) {
+      const attemptKey = `${isAdmin}-${activeTab}-${fetchDays}`;
+      if (lastAutoUpgradeAttemptRef.current === attemptKey) return;
+      lastAutoUpgradeAttemptRef.current = attemptKey;
+      handlePullFromSheets(true, fetchDays);
+    } else {
+      lastAutoUpgradeAttemptRef.current = null;
+    }
+  }, [activeTab, isAdmin, fetchDays, loadedRangeInfo.days, isFetchingFromSheets, handlePullFromSheets]);
 
   // 1.1 Auto-detect QR Code scan URL parameter (e.g. ?inspect=<vehicleId> or ?vehicleId=<id>)
   useEffect(() => {
