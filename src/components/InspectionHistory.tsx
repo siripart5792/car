@@ -33,10 +33,13 @@ import {
   AlertCircle,
   Clock,
   Copy,
-  Wrench
+  Wrench,
+  RefreshCw,
+  Database
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { InspectionRecord, Vehicle, OverallStatus } from '../types/vehicle';
+import { InspectionFetchDays } from '../services/googleSheets';
 import { ConfirmModal } from './ConfirmModal';
 
 export interface VehiclePeriodSummary {
@@ -94,6 +97,17 @@ interface InspectionHistoryProps {
   onOpenSheets?: () => void;
   isSheetsConnected: boolean;
   onStartInspection?: (vehicleId: string) => void;
+  fetchDays?: InspectionFetchDays;
+  loadedRangeInfo?: {
+    days: InspectionFetchDays;
+    startDate?: string;
+    endDate?: string;
+    totalInSheet?: number;
+    serverFiltered?: boolean;
+  };
+  isFetchingSheets?: boolean;
+  onFetchByDateRange?: (startDate?: string, endDate?: string, days?: InspectionFetchDays) => Promise<void>;
+  onChangeFetchDays?: (days: InspectionFetchDays) => Promise<void>;
 }
 
 const OVERALL_STATUS_BADGES: Record<OverallStatus, { label: string; bg: string; text: string; icon: React.ReactNode }> = {
@@ -134,6 +148,11 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
   onOpenSheets,
   isSheetsConnected,
   onStartInspection,
+  fetchDays = 30,
+  loadedRangeInfo,
+  isFetchingSheets = false,
+  onFetchByDateRange,
+  onChangeFetchDays,
 }) => {
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
@@ -1329,6 +1348,108 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
             )}
           </div>
         </div>
+
+        {/* Google Sheets Fetch Range Bar */}
+        {isSheetsConnected && (onChangeFetchDays || onFetchByDateRange) && (() => {
+          const loadedDays = loadedRangeInfo?.days ?? fetchDays;
+          const loadedStart = loadedRangeInfo?.startDate;
+          const isOutsideLoaded =
+            loadedDays !== 'all' &&
+            ((datePreset === 'all' && !startDate && !endDate) ||
+              (Boolean(startDate) && Boolean(loadedStart) && startDate < loadedStart!));
+
+          return (
+            <div className="pt-3 border-t border-slate-100 flex flex-col gap-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex flex-wrap items-center gap-2 text-slate-600">
+                  <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
+                    <Database className="w-3.5 h-3.5 text-emerald-600" />
+                    ขอบเขตดึงข้อมูลจาก Google Sheets:
+                  </span>
+                  {onChangeFetchDays ? (
+                    <select
+                      value={String(fetchDays)}
+                      disabled={isFetchingSheets}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const parsed: InspectionFetchDays =
+                          val === 'all' ? 'all' : (Number(val) as InspectionFetchDays);
+                        onChangeFetchDays(parsed);
+                      }}
+                      className="px-2.5 py-1 bg-emerald-50/70 hover:bg-emerald-50 border border-emerald-200 text-emerald-900 font-bold rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/20 disabled:opacity-60 cursor-pointer"
+                      title="จำกัดช่วงวันที่ที่ดึงข้อมูลอัตโนมัติจาก Google Sheets เพื่อให้โหลดเร็วขึ้น"
+                    >
+                      <option value="7">7 วันล่าสุด (เร็วที่สุด)</option>
+                      <option value="30">30 วันล่าสุด (แนะนำ)</option>
+                      <option value="90">90 วันล่าสุด (3 เดือน)</option>
+                      <option value="180">180 วันล่าสุด (6 เดือน)</option>
+                      <option value="365">365 วันล่าสุด (1 ปี)</option>
+                      <option value="all">ดึงทั้งหมด (อาจช้าเมื่อข้อมูลเยอะ)</option>
+                    </select>
+                  ) : (
+                    <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg font-bold">
+                      {loadedDays === 'all' ? 'ทั้งหมด' : `${loadedDays} วันล่าสุด`}
+                    </span>
+                  )}
+                  <span className="text-[11px] text-slate-500">
+                    โหลดแล้ว <strong className="text-slate-700">{records.length.toLocaleString()}</strong> รายการ
+                    {typeof loadedRangeInfo?.totalInSheet === 'number' && loadedRangeInfo.totalInSheet > records.length
+                      ? ` (จากทั้งหมด ${loadedRangeInfo.totalInSheet.toLocaleString()} แถวในชีต)`
+                      : ''}
+                  </span>
+                </div>
+
+                {onFetchByDateRange && (startDate || endDate) && (
+                  <button
+                    type="button"
+                    disabled={isFetchingSheets}
+                    onClick={() => onFetchByDateRange(startDate || undefined, endDate || undefined)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
+                    title="ดึงข้อมูลเฉพาะช่วงวันที่ที่เลือกจาก Google Sheets มาแสดง"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isFetchingSheets ? 'animate-spin' : ''}`} />
+                    <span>ดึงข้อมูลช่วงวันที่นี้จาก Sheets</span>
+                  </button>
+                )}
+              </div>
+
+              {isOutsideLoaded && onFetchByDateRange && (
+                <div className="p-2.5 sm:p-3 bg-blue-50/80 border border-blue-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-blue-900">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>
+                      ขณะนี้โหลดข้อมูลมาแสดงเฉพาะ{' '}
+                      <strong>
+                        {loadedDays} วันล่าสุด
+                        {loadedStart ? ` (ตั้งแต่ ${new Date(loadedStart + 'T00:00:00').toLocaleDateString('th-TH')})` : ''}
+                      </strong>{' '}
+                      เพื่อความรวดเร็ว ช่วงวันที่ที่คุณเลือกอาจมีข้อมูลเก่ากว่าใน Google Sheets
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isFetchingSheets}
+                    onClick={() =>
+                      datePreset === 'all' && !startDate && !endDate
+                        ? onFetchByDateRange(undefined, undefined, 'all')
+                        : onFetchByDateRange(startDate || undefined, endDate || undefined)
+                    }
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-2xs transition-all shrink-0 disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isFetchingSheets ? 'animate-spin' : ''}`} />
+                    <span>
+                      {isFetchingSheets
+                        ? 'กำลังดึงข้อมูล...'
+                        : datePreset === 'all' && !startDate && !endDate
+                        ? 'ดึงประวัติทั้งหมดจาก Google Sheets'
+                        : 'ดึงข้อมูลช่วงวันที่นี้จาก Google Sheets'}
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {(searchTerm || selectedBranches.length > 0 || selectedCategoryFilter !== 'all' || selectedVehicleFilter !== 'all' || selectedStatusFilter !== 'all' || startDate || endDate || datePreset !== 'all') && (
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 pt-3 border-t border-slate-100">

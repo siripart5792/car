@@ -53,7 +53,12 @@ function doGet(e) {
   }
 
   if (action === 'getAllData') {
-    var data = loadAllDataFromSheets(ss);
+    var getAllOpts = {
+      days: e && e.parameter && e.parameter.days,
+      startDate: e && e.parameter && e.parameter.startDate,
+      endDate: e && e.parameter && e.parameter.endDate
+    };
+    var data = loadAllDataFromSheets(ss, getAllOpts);
     return createJsonResponse({
       success: true,
       data: data
@@ -68,9 +73,19 @@ function doGet(e) {
   }
 
   if (action === 'getInspections') {
+    var getInspOpts = {
+      days: e && e.parameter && e.parameter.days,
+      startDate: e && e.parameter && e.parameter.startDate,
+      endDate: e && e.parameter && e.parameter.endDate
+    };
+    var inspMeta = readInspectionsWithMeta(ss, getInspOpts);
     return createJsonResponse({
       success: true,
-      inspections: readInspections(ss)
+      inspections: inspMeta.inspections,
+      totalInspectionRows: inspMeta.totalInspectionRows,
+      serverFiltered: inspMeta.serverFiltered,
+      appliedStartDate: inspMeta.appliedStartDate,
+      appliedEndDate: inspMeta.appliedEndDate
     });
   }
 
@@ -136,12 +151,33 @@ function doPost(e) {
       });
     }
 
-    // 1. ดึงข้อมูลทั้งหมด
+    // 1. ดึงข้อมูลทั้งหมด (รองรับจำกัดช่วงวันที่ days / startDate / endDate)
     if (action === 'getAllData') {
-      var allData = loadAllDataFromSheets(ss);
+      var allData = loadAllDataFromSheets(ss, {
+        days: payload.days,
+        startDate: payload.startDate,
+        endDate: payload.endDate
+      });
       return createJsonResponse({
         success: true,
         data: allData
+      });
+    }
+
+    // 1.1 ดึงเฉพาะประวัติการตรวจเช็คตามช่วงวันที่
+    if (action === 'getInspections') {
+      var inspResult = readInspectionsWithMeta(ss, {
+        days: payload.days,
+        startDate: payload.startDate,
+        endDate: payload.endDate
+      });
+      return createJsonResponse({
+        success: true,
+        inspections: inspResult.inspections,
+        totalInspectionRows: inspResult.totalInspectionRows,
+        serverFiltered: inspResult.serverFiltered,
+        appliedStartDate: inspResult.appliedStartDate,
+        appliedEndDate: inspResult.appliedEndDate
       });
     }
 
@@ -192,6 +228,20 @@ function doPost(e) {
       return createJsonResponse({
         success: true,
         message: 'ลบข้อมูลรถรหัส ' + vehicleId + ' สำเร็จ'
+      });
+    }
+
+    // 4.1 ลบประวัติการตรวจเช็ค 1 รายการ (โดยไม่กระทบข้อมูลประวัติวันอื่น)
+    if (action === 'deleteInspection') {
+      var recordIdToDelete = payload.recordId;
+      if (!recordIdToDelete) {
+        return createJsonResponse({ success: false, message: 'ระบุ recordId ที่ต้องการลบ' });
+      }
+      deleteSingleInspection(ss, recordIdToDelete);
+      recalculateBranchSummary(ss);
+      return createJsonResponse({
+        success: true,
+        message: 'ลบบันทึกการตรวจรหัส ' + recordIdToDelete + ' สำเร็จ'
       });
     }
 
@@ -840,7 +890,9 @@ function populateDefaultAdminsSheet(sheet) {
  */
 function recalculateBranchSummary(ss) {
   var vehicles = readVehicles(ss);
-  var inspections = readInspections(ss);
+  var todayStr = Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyy-MM-dd');
+  // อ่านเฉพาะบันทึกของวันนี้เพื่อความรวดเร็ว
+  var inspections = readInspections(ss, { startDate: todayStr, endDate: todayStr });
   var branchList = readBranches(ss);
 
   var branchSet = {};
@@ -855,7 +907,6 @@ function recalculateBranchSummary(ss) {
     branches = ['กฟภ. สำนักงานใหญ่'];
   }
 
-  var todayStr = Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyy-MM-dd');
   var inspectedTodayVehicles = {};
   inspections.forEach(function(i) {
     if (i.inspectionDate && i.inspectionDate.indexOf(todayStr) === 0) {
@@ -1304,17 +1355,135 @@ function readVehicles(ss) {
 }
 
 /**
- * อ่านประวัติการตรวจเช็คทั้งหมดจากแผ่นงาน
+ * ลบประวัติการตรวจเช็ค 1 แถวตาม recordId
  */
-function readInspections(ss) {
+function deleteSingleInspection(ss, recordId) {
   var sheet = ss.getSheetByName(SHEET_INSPECTIONS);
-  if (!sheet) return [];
+  if (!sheet) return;
   var data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return [];
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(recordId)) {
+      sheet.deleteRow(i + 1);
+      break;
+    }
+  }
+}
 
+/**
+ * แปลงตัวเลือก days / startDate / endDate เป็นช่วง yyyy-MM-dd
+ */
+function resolveInspectionDateWindow(options) {
+  var opts = options || {};
+  var startDate = opts.startDate ? String(opts.startDate).trim() : '';
+  var endDate = opts.endDate ? String(opts.endDate).trim() : '';
+
+  if (!startDate && !endDate && opts.days && String(opts.days) !== 'all') {
+    var daysNum = Number(opts.days);
+    if (!isNaN(daysNum) && daysNum > 0) {
+      var now = new Date();
+      var start = new Date(now.getTime() - (daysNum - 1) * 24 * 60 * 60 * 1000);
+      startDate = Utilities.formatDate(start, 'Asia/Bangkok', 'yyyy-MM-dd');
+      endDate = Utilities.formatDate(now, 'Asia/Bangkok', 'yyyy-MM-dd');
+    }
+  }
+
+  return {
+    startDate: startDate,
+    endDate: endDate
+  };
+}
+
+/**
+ * ดึงวันที่ yyyy-MM-dd ของแถวประวัติการตรวจเช็คโดยไม่ต้อง JSON.parse ทั้งแถว (ลดเวลา CPU)
+ */
+function extractRowInspectionYmd(row) {
+  var jsonRaw = row[17];
+  if (jsonRaw && typeof jsonRaw === 'string') {
+    var m = jsonRaw.match(/"inspectionDate"\\s*:\\s*"(\\d{4}-\\d{2}-\\d{2})/);
+    if (m && m[1]) {
+      // แปลงเวลา UTC ใน JSON เป็น yyyy-MM-dd ตามเวลาไทย (Asia/Bangkok) เพื่อความแม่นยำ
+      var fullMatch = jsonRaw.match(/"inspectionDate"\\s*:\\s*"([^"]+)"/);
+      if (fullMatch && fullMatch[1]) {
+        var parsedDate = new Date(fullMatch[1]);
+        if (!isNaN(parsedDate.getTime())) {
+          return Utilities.formatDate(parsedDate, 'Asia/Bangkok', 'yyyy-MM-dd');
+        }
+      }
+      return m[1];
+    }
+  }
+
+  var dateCell = row[1];
+  if (dateCell instanceof Date && !isNaN(dateCell.getTime())) {
+    var y = dateCell.getFullYear();
+    if (y > 2400) y = y - 543;
+    var mm = ('0' + (dateCell.getMonth() + 1)).slice(-2);
+    var dd = ('0' + dateCell.getDate()).slice(-2);
+    return y + '-' + mm + '-' + dd;
+  }
+
+  if (typeof dateCell === 'string' && dateCell.trim()) {
+    var str = dateCell.trim();
+    // รูปแบบ dd/MM/yyyy ...
+    var dmy = str.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})/);
+    if (dmy) {
+      var yr = Number(dmy[3]);
+      if (yr > 2400) yr = yr - 543;
+      return yr + '-' + ('0' + dmy[2]).slice(-2) + '-' + ('0' + dmy[1]).slice(-2);
+    }
+    // รูปแบบ yyyy-MM-dd
+    var ymd = str.match(/^(\\d{4})-(\\d{2})-(\\d{2})/);
+    if (ymd) {
+      return ymd[1] + '-' + ymd[2] + '-' + ymd[3];
+    }
+  }
+
+  return '';
+}
+
+/**
+ * อ่านประวัติการตรวจเช็คจากแผ่นงาน (รองรับจำกัดช่วงวันที่และส่งคืนข้อมูลสถิติรวม)
+ */
+function readInspectionsWithMeta(ss, options) {
+  var sheet = ss.getSheetByName(SHEET_INSPECTIONS);
+  if (!sheet) {
+    return {
+      inspections: [],
+      totalInspectionRows: 0,
+      serverFiltered: true,
+      appliedStartDate: '',
+      appliedEndDate: ''
+    };
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var totalRows = Math.max(0, data.length - 1);
+  if (data.length <= 1) {
+    return {
+      inspections: [],
+      totalInspectionRows: 0,
+      serverFiltered: true,
+      appliedStartDate: '',
+      appliedEndDate: ''
+    };
+  }
+
+  var win = resolveInspectionDateWindow(options);
+  var hasRange = Boolean(win.startDate || win.endDate);
   var result = [];
+
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
+    if (!row[0] && !row[1] && !row[17]) continue;
+
+    if (hasRange) {
+      var rowYmd = extractRowInspectionYmd(row);
+      if (rowYmd) {
+        if (win.startDate && rowYmd < win.startDate) continue;
+        if (win.endDate && rowYmd > win.endDate) continue;
+      }
+    }
+
     var jsonRaw = row[17];
     if (jsonRaw) {
       try {
@@ -1322,9 +1491,11 @@ function readInspections(ss) {
         continue;
       } catch (e) {}
     }
+
+    var fallbackYmd = extractRowInspectionYmd(row);
     result.push({
       id: String(row[0]),
-      inspectionDate: new Date().toISOString(),
+      inspectionDate: fallbackYmd ? (fallbackYmd + 'T08:00:00.000Z') : new Date().toISOString(),
       peaBranch: String(row[2] || 'กฟภ. สำนักงานใหญ่'),
       vehicleLicensePlate: String(row[3] || ''),
       vehicleCategory: 'general',
@@ -1341,7 +1512,21 @@ function readInspections(ss) {
       summaryRemarks: String(row[16] || '')
     });
   }
-  return result;
+
+  return {
+    inspections: result,
+    totalInspectionRows: totalRows,
+    serverFiltered: true,
+    appliedStartDate: win.startDate || '',
+    appliedEndDate: win.endDate || ''
+  };
+}
+
+/**
+ * อ่านประวัติการตรวจเช็คจากแผ่นงาน (รองรับการส่ง options)
+ */
+function readInspections(ss, options) {
+  return readInspectionsWithMeta(ss, options).inspections;
 }
 
 /**
@@ -1416,12 +1601,17 @@ function readAdmins(ss) {
 }
 
 /**
- * โหลดข้อมูลทั้งหมดรวมกัน (รวมทั้ง 8 แผ่นงาน)
+ * โหลดข้อมูลทั้งหมดรวมกัน (รวมทั้ง 8 แผ่นงาน และรองรับจำกัดช่วงวันที่ประวัติการตรวจ)
  */
-function loadAllDataFromSheets(ss) {
+function loadAllDataFromSheets(ss, options) {
+  var inspMeta = readInspectionsWithMeta(ss, options);
   return {
     vehicles: readVehicles(ss),
-    inspections: readInspections(ss),
+    inspections: inspMeta.inspections,
+    totalInspectionRows: inspMeta.totalInspectionRows,
+    serverFiltered: inspMeta.serverFiltered,
+    appliedStartDate: inspMeta.appliedStartDate,
+    appliedEndDate: inspMeta.appliedEndDate,
     branches: readBranches(ss),
     checklistTemplates: readAllChecklists(ss),
     adminUsers: readAdmins(ss),

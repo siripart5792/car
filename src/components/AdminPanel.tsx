@@ -57,7 +57,8 @@ import {
   saveWebhookUrl,
   testAppsScriptConnection,
   DEFAULT_WEBHOOK_URL,
-  resetWebhookUrlToDefault
+  resetWebhookUrlToDefault,
+  InspectionFetchDays
 } from '../services/googleSheets';
 import { GOOGLE_APPS_SCRIPT_CODE } from '../data/googleAppsScriptCode';
 import { 
@@ -92,6 +93,15 @@ interface AdminPanelProps {
   onDeletePeaBranch?: (branchName: string) => Promise<{ success: boolean; message: string }>;
   onLoadDataFromSheets?: () => Promise<void>;
   onAdminAuthChange?: (isLoggedIn: boolean, adminUser: AdminUser | null) => void;
+  fetchDays?: InspectionFetchDays;
+  loadedRangeInfo?: {
+    days: InspectionFetchDays;
+    startDate?: string;
+    endDate?: string;
+    totalInSheet?: number;
+    serverFiltered?: boolean;
+  };
+  onChangeFetchDays?: (days: InspectionFetchDays) => Promise<void>;
 }
 
 type AdminSubTab = 'vehicles' | 'general_checklist' | 'crane_checklist' | 'bucket_checklist' | 'admin_users' | 'pea_branches' | 'sheets_config';
@@ -125,6 +135,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   onDeletePeaBranch,
   onLoadDataFromSheets,
   onAdminAuthChange,
+  fetchDays = 30,
+  loadedRangeInfo,
+  onChangeFetchDays,
 }) => {
   // Admin users list state (synchronized with Google Sheet 'ข้อมูลผู้ดูแลระบบ')
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => {
@@ -1944,6 +1957,68 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       </p>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* Date Range Limit Configuration for Performance */}
+              {onChangeFetchDays && (
+                <div className="pt-3 mt-2 border-t border-white/10 space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-bold text-emerald-200 block">
+                        ⚡ จำกัดช่วงวันที่ดึงข้อมูลประวัติการตรวจจาก Google Sheets (เพื่อความเร็วในการโหลด)
+                      </span>
+                      <span className="text-[11px] text-emerald-100/70 block mt-0.5">
+                        ช่วยลดขนาดข้อมูลเมื่อชีต "ประวัติการตรวจเช็ค" มีหลายพันแถว (สามารถกดดึงย้อนหลังเฉพาะช่วงในหน้าประวัติได้เสมอ)
+                      </span>
+                    </div>
+                    {typeof loadedRangeInfo?.totalInSheet === 'number' && (
+                      <span className="px-2.5 py-1 bg-white/10 rounded-lg text-[11px] font-semibold text-emerald-200 shrink-0 self-start sm:self-auto">
+                        ในชีตมีทั้งหมด {loadedRangeInfo.totalInSheet.toLocaleString()} แถว
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {(
+                      [
+                        { value: 7, label: '7 วันล่าสุด (เร็วสุด)' },
+                        { value: 30, label: '30 วันล่าสุด (แนะนำ)' },
+                        { value: 90, label: '90 วันล่าสุด (3 เดือน)' },
+                        { value: 180, label: '180 วันล่าสุด (6 เดือน)' },
+                        { value: 365, label: '365 วันล่าสุด (1 ปี)' },
+                        { value: 'all', label: 'ดึงทั้งหมด' },
+                      ] as { value: InspectionFetchDays; label: string }[]
+                    ).map((opt) => {
+                      const active = fetchDays === opt.value;
+                      return (
+                        <button
+                          key={String(opt.value)}
+                          type="button"
+                          disabled={isPullingData}
+                          onClick={async () => {
+                            setIsPullingData(true);
+                            try {
+                              await onChangeFetchDays(opt.value);
+                            } finally {
+                              setIsPullingData(false);
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer disabled:opacity-50 ${
+                            active
+                              ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
+                              : 'bg-slate-900/70 hover:bg-slate-800 text-emerald-100 border border-emerald-500/25'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-[11px] text-amber-200/85 leading-relaxed">
+                    💡 <strong>หมายเหตุ:</strong> หากคุณเคยติดตั้งโค้ด Apps Script เวอร์ชันเดิมไว้ใน Google Sheets แล้ว แนะนำให้คัดลอกโค้ด <strong>Code.gs</strong> ด้านบนไปวางแทนที่และ Deploy ใหม่อีกครั้ง เพื่อให้ระบบกรองวันที่ตั้งแต่ฝั่ง Google Sheets โดยตรง (โหลดเร็วขึ้นสูงสุด)
+                  </p>
                 </div>
               )}
             </div>

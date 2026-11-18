@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Car, 
   ClipboardCheck, 
@@ -68,10 +68,16 @@ import {
   saveWebhookUrl,
   callAppsScriptApi,
   fetchDataFromAppsScript,
+  fetchInspectionsRangeFromAppsScript,
   syncAllViaAppsScript,
   syncAdminUsersViaAppsScript,
   syncChecklistTemplatesViaAppsScript,
-  syncChecklistTemplatesToSheet
+  syncChecklistTemplatesToSheet,
+  InspectionFetchDays,
+  getSavedFetchDays,
+  saveFetchDays,
+  computeDateRangeFromDays,
+  filterInspectionsByDateRange
 } from './services/googleSheets';
 
 import { Dashboard } from './components/Dashboard';
@@ -111,6 +117,24 @@ export default function App() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isFetchingFromSheets, setIsFetchingFromSheets] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [fetchDays, setFetchDays] = useState<InspectionFetchDays>(() => getSavedFetchDays());
+  const fetchDaysRef = useRef<InspectionFetchDays>(fetchDays);
+  const lastPullTimeRef = useRef<number>(0);
+  const [loadedRangeInfo, setLoadedRangeInfo] = useState<{
+    days: InspectionFetchDays;
+    startDate?: string;
+    endDate?: string;
+    totalInSheet?: number;
+    serverFiltered?: boolean;
+  }>(() => {
+    const initialDays = getSavedFetchDays();
+    const range = computeDateRangeFromDays(initialDays);
+    return {
+      days: initialDays,
+      startDate: range.startDate,
+      endDate: range.endDate,
+    };
+  });
 
   // Set document title to exact user requirement
   useEffect(() => {
@@ -134,18 +158,35 @@ export default function App() {
 
   const isSheetsConnected = !!getSavedWebhookUrl() || (!!(accessToken || getStoredAccessToken()) && !!(spreadsheetInfo || getSavedSpreadsheetInfo()));
 
-  // Pull latest fleet, checklist templates, and inspection history from Google Sheets via Apps Script
-  const handlePullFromSheets = useCallback(async (silent = false) => {
+  // Pull latest fleet, checklist templates, and inspection history (limited by date range) from Google Sheets via Apps Script
+  const handlePullFromSheets = useCallback(async (silent = false, overrideDays?: InspectionFetchDays) => {
     const webhookUrl = getSavedWebhookUrl() || DEFAULT_WEBHOOK_URL;
     if (!webhookUrl) {
       if (!silent) showToast('กรุณาระบุ URL ของ Google Apps Script ในหน้าตั้งค่าก่อน', 'error');
       return;
     }
+
+    // Cooldown 2 minutes for background auto-refresh on tab focus/visibility change
+    if (silent && overrideDays === undefined && Date.now() - lastPullTimeRef.current < 120_000) {
+      return;
+    }
+
+    const activeDays = overrideDays !== undefined ? overrideDays : fetchDaysRef.current;
+    const range = computeDateRangeFromDays(activeDays);
+
     setIsFetchingFromSheets(true);
     try {
-      if (!silent) showToast('กำลังดึงข้อมูลล่าสุดจาก Google Sheets...', 'info');
-      const res = await fetchDataFromAppsScript(webhookUrl);
+      if (!silent) {
+        const rangeText = activeDays === 'all' ? 'ทั้งหมด' : `${activeDays} วันล่าสุด`;
+        showToast(`กำลังดึงข้อมูลจาก Google Sheets (${rangeText})...`, 'info');
+      }
+      const res = await fetchDataFromAppsScript(webhookUrl, {
+        days: activeDays,
+        startDate: range.startDate,
+        endDate: range.endDate,
+      });
       if (res.success) {
+        lastPullTimeRef.current = Date.now();
         let countVehicles = 0;
         let countInspections = 0;
         const updatedParts: string[] = [];
@@ -169,12 +210,27 @@ export default function App() {
           countVehicles = res.vehicles.length;
           updatedParts.push(`รถ ${countVehicles} คัน`);
         }
-        if (res.inspections && res.inspections.length > 0) {
-          setInspections(res.inspections);
-          saveInspections(res.inspections);
-          countInspections = res.inspections.length;
-          updatedParts.push(`ประวัติ ${countInspections} รายการ`);
+
+        if (Array.isArray(res.inspections)) {
+          const finalInspections =
+            res.serverFiltered || activeDays === 'all'
+              ? res.inspections
+              : filterInspectionsByDateRange(res.inspections, range.startDate, range.endDate);
+          setInspections(finalInspections);
+          saveInspections(finalInspections);
+          countInspections = finalInspections.length;
+          const rangeTag = activeDays === 'all' ? 'ทั้งหมด' : `${activeDays} วันล่าสุด`;
+          updatedParts.push(`ประวัติ ${countInspections} รายการ (${rangeTag})`);
         }
+
+        setLoadedRangeInfo({
+          days: activeDays,
+          startDate: res.appliedStartDate || range.startDate,
+          endDate: res.appliedEndDate || range.endDate,
+          totalInSheet: res.totalInspectionRows,
+          serverFiltered: res.serverFiltered,
+        });
+
         if (res.branches && res.branches.length > 0) {
           setPeaBranches(res.branches);
           savePeaBranches(res.branches);
@@ -208,6 +264,113 @@ export default function App() {
       setIsFetchingFromSheets(false);
     }
   }, []);
+
+  const handleChangeFetchDays = async (newDays: InspectionFetchDays) => {
+    setFetchDays(newDays);
+    fetchDaysRef.current = newDays;
+    saveFetchDays(newDays);
+    await handlePullFromSheets(false, newDays);
+  };
+
+  // On-demand fetch for a specific historical date range from InspectionHistory
+  const handleFetchInspectionsByRange = async (
+    startDate?: string,
+    endDate?: string,
+    days?: InspectionFetchDays
+  ) => {
+    const webhookUrl = getSavedWebhookUrl() || DEFAULT_WEBHOOK_URL;
+    if (!webhookUrl) {
+      showToast('กรุณาระบุ URL ของ Google Apps Script ในหน้าตั้งค่าก่อน', 'error');
+      return;
+    }
+
+    setIsFetchingFromSheets(true);
+    try {
+      const rangeDesc =
+        days === 'all' || (!startDate && !endDate && !days)
+          ? 'ประวัติทั้งหมด'
+          : startDate && endDate
+          ? `${startDate} ถึง ${endDate}`
+          : startDate
+          ? `ตั้งแต่ ${startDate}`
+          : `${days} วันล่าสุด`;
+      showToast(`กำลังดึงประวัติการตรวจ (${rangeDesc}) จาก Google Sheets...`, 'info');
+
+      let res = await fetchInspectionsRangeFromAppsScript(webhookUrl, { days, startDate, endDate });
+      if (!res.success) {
+        // Fallback to getAllData if older Apps Script doesn't support getInspections POST/GET cleanly
+        const fallback = await fetchDataFromAppsScript(webhookUrl, { days, startDate, endDate });
+        if (fallback.success) {
+          res = {
+            success: true,
+            inspections: fallback.inspections,
+            totalInspectionRows: fallback.totalInspectionRows,
+            serverFiltered: fallback.serverFiltered,
+            appliedStartDate: fallback.appliedStartDate,
+            appliedEndDate: fallback.appliedEndDate,
+          };
+        }
+      }
+
+      if (res.success && Array.isArray(res.inspections)) {
+        const fetchedList =
+          res.serverFiltered || (!startDate && !endDate && (!days || days === 'all'))
+            ? res.inspections
+            : filterInspectionsByDateRange(res.inspections, startDate, endDate);
+
+        // Merge with existing records in memory so already-loaded recent data stays intact
+        setInspections((prev) => {
+          if (days === 'all' || (!startDate && !endDate && !days)) {
+            saveInspections(fetchedList);
+            return fetchedList;
+          }
+          const mergedMap = new Map<string, InspectionRecord>();
+          prev.forEach((r) => mergedMap.set(r.id, r));
+          fetchedList.forEach((r) => mergedMap.set(r.id, r));
+          const merged = Array.from(mergedMap.values()).sort(
+            (a, b) => new Date(b.inspectionDate).getTime() - new Date(a.inspectionDate).getTime()
+          );
+          saveInspections(merged);
+          return merged;
+        });
+
+        setLoadedRangeInfo((prev) => {
+          const nextDays = days || prev.days;
+          const newStart =
+            days === 'all' || (!startDate && !endDate && !days)
+              ? undefined
+              : startDate && prev.startDate
+              ? startDate < prev.startDate
+                ? startDate
+                : prev.startDate
+              : startDate || prev.startDate;
+          const newEnd =
+            days === 'all' || (!startDate && !endDate && !days)
+              ? undefined
+              : endDate && prev.endDate
+              ? endDate > prev.endDate
+                ? endDate
+                : prev.endDate
+              : endDate || prev.endDate;
+          return {
+            days: days === 'all' || (!startDate && !endDate && !days) ? 'all' : nextDays,
+            startDate: newStart,
+            endDate: newEnd,
+            totalInSheet: res.totalInspectionRows ?? prev.totalInSheet,
+            serverFiltered: res.serverFiltered ?? prev.serverFiltered,
+          };
+        });
+
+        showToast(`ดึงประวัติการตรวจสำเร็จ พบ ${fetchedList.length} รายการ (${rangeDesc})`, 'success');
+      } else {
+        showToast(res.message || 'ไม่สามารถดึงประวัติการตรวจจาก Google Sheets ได้', 'error');
+      }
+    } catch (err: any) {
+      showToast(`ดึงประวัติไม่สำเร็จ: ${err?.message || 'เกิดข้อผิดพลาด'}`, 'error');
+    } finally {
+      setIsFetchingFromSheets(false);
+    }
+  };
 
   // 1. Initialize Firebase Auth State Listener & Auto-fetch Google Sheets on initial open / refresh
   useEffect(() => {
@@ -621,7 +784,7 @@ export default function App() {
 
     const webhookUrl = getSavedWebhookUrl();
     if (webhookUrl) {
-      callAppsScriptApi(webhookUrl, { action: 'syncAll', inspections: updated, vehicles }).catch(console.warn);
+      callAppsScriptApi(webhookUrl, { action: 'deleteInspection', recordId }).catch(console.warn);
     }
 
     const currentToken = accessToken || getStoredAccessToken();
@@ -1081,6 +1244,11 @@ export default function App() {
             } : undefined}
             isSheetsConnected={isSheetsConnected}
             onStartInspection={handleStartInspectionForVehicle}
+            fetchDays={fetchDays}
+            loadedRangeInfo={loadedRangeInfo}
+            isFetchingSheets={isFetchingFromSheets}
+            onFetchByDateRange={handleFetchInspectionsByRange}
+            onChangeFetchDays={handleChangeFetchDays}
           />
         )}
 
@@ -1108,6 +1276,9 @@ export default function App() {
             onAddPeaBranch={handleAddPeaBranch}
             onDeletePeaBranch={handleDeletePeaBranch}
             onLoadDataFromSheets={() => handlePullFromSheets(false)}
+            fetchDays={fetchDays}
+            loadedRangeInfo={loadedRangeInfo}
+            onChangeFetchDays={handleChangeFetchDays}
           />
         )}
       </main>

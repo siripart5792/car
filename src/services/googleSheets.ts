@@ -3,6 +3,15 @@ import { Vehicle, InspectionRecord, AdminUser, ChecklistTemplatesState, Inspecti
 const SPREADSHEET_STORAGE_KEY = 'vehicle_inspection_spreadsheet_id';
 const SPREADSHEET_INFO_STORAGE_KEY = 'vehicle_inspection_spreadsheet_info_v3';
 const WEBHOOK_URL_STORAGE_KEY = 'vehicle_inspection_webhook_url';
+const FETCH_DAYS_STORAGE_KEY = 'vehicle_inspection_fetch_days_v1';
+
+export type InspectionFetchDays = 7 | 30 | 90 | 180 | 365 | 'all';
+
+export interface FetchDateRangeOptions {
+  days?: InspectionFetchDays;
+  startDate?: string; // YYYY-MM-DD
+  endDate?: string;   // YYYY-MM-DD
+}
 
 export interface SpreadsheetInfo {
   id: string;
@@ -124,6 +133,82 @@ export const clearSpreadsheetId = (): void => {
   localStorage.removeItem(SPREADSHEET_INFO_STORAGE_KEY);
 };
 
+export const getSavedFetchDays = (): InspectionFetchDays => {
+  try {
+    const raw = localStorage.getItem(FETCH_DAYS_STORAGE_KEY);
+    if (!raw) return 30;
+    if (raw === 'all') return 'all';
+    const num = Number(raw);
+    if (num === 7 || num === 30 || num === 90 || num === 180 || num === 365) {
+      return num;
+    }
+    return 30;
+  } catch {
+    return 30;
+  }
+};
+
+export const saveFetchDays = (days: InspectionFetchDays): void => {
+  try {
+    localStorage.setItem(FETCH_DAYS_STORAGE_KEY, String(days));
+  } catch {
+    // ignore
+  }
+};
+
+export const formatLocalYMD = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export const computeDateRangeFromDays = (
+  days: InspectionFetchDays
+): { startDate?: string; endDate?: string } => {
+  if (days === 'all') {
+    return {};
+  }
+  const now = new Date();
+  const start = new Date(now);
+  start.setDate(start.getDate() - (days - 1));
+  return {
+    startDate: formatLocalYMD(start),
+    endDate: formatLocalYMD(now),
+  };
+};
+
+export const extractInspectionYMD = (inspectionDate: string): string => {
+  if (!inspectionDate) return '';
+  try {
+    const d = new Date(inspectionDate);
+    if (!isNaN(d.getTime())) {
+      return formatLocalYMD(d);
+    }
+  } catch {
+    // ignore
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(inspectionDate)) {
+    return inspectionDate.substring(0, 10);
+  }
+  return '';
+};
+
+export const filterInspectionsByDateRange = (
+  records: InspectionRecord[],
+  startDate?: string,
+  endDate?: string
+): InspectionRecord[] => {
+  if (!startDate && !endDate) return records;
+  return records.filter((rec) => {
+    const recYmd = extractInspectionYMD(rec.inspectionDate);
+    if (!recYmd) return true;
+    if (startDate && recYmd < startDate) return false;
+    if (endDate && recYmd > endDate) return false;
+    return true;
+  });
+};
+
 /**
  * Call Google Apps Script Web App API
  * Uses Content-Type text/plain to prevent browser CORS preflight (OPTIONS)
@@ -214,8 +299,12 @@ export async function testAppsScriptConnection(url: string): Promise<{
 
 /**
  * Fetch all data from Google Apps Script to synchronize local state
+ * Supports optional date range limiting (days / startDate / endDate) to keep payloads small and fast
  */
-export async function fetchDataFromAppsScript(url: string): Promise<{
+export async function fetchDataFromAppsScript(
+  url: string,
+  options?: FetchDateRangeOptions
+): Promise<{
   success: boolean;
   vehicles?: Vehicle[];
   inspections?: InspectionRecord[];
@@ -225,6 +314,10 @@ export async function fetchDataFromAppsScript(url: string): Promise<{
   sheetTitle?: string;
   sheetId?: string;
   sheetUrl?: string;
+  totalInspectionRows?: number;
+  serverFiltered?: boolean;
+  appliedStartDate?: string;
+  appliedEndDate?: string;
   message?: string;
 }> {
   const cleanUrl = url.trim();
@@ -232,8 +325,22 @@ export async function fetchDataFromAppsScript(url: string): Promise<{
     return { success: false, message: 'ไม่มี URL ของ Google Apps Script' };
   }
 
+  const resolvedRange =
+    options?.startDate || options?.endDate
+      ? { startDate: options.startDate, endDate: options.endDate }
+      : options?.days
+      ? computeDateRangeFromDays(options.days)
+      : {};
+
+  const queryParams = new URLSearchParams();
+  queryParams.set('action', 'getAllData');
+  if (options?.days !== undefined) queryParams.set('days', String(options.days));
+  if (resolvedRange.startDate) queryParams.set('startDate', resolvedRange.startDate);
+  if (resolvedRange.endDate) queryParams.set('endDate', resolvedRange.endDate);
+
   try {
-    const getUrl = cleanUrl.includes('?') ? `${cleanUrl}&action=getAllData` : `${cleanUrl}?action=getAllData`;
+    const separator = cleanUrl.includes('?') ? '&' : '?';
+    const getUrl = `${cleanUrl}${separator}${queryParams.toString()}`;
     const res = await fetch(getUrl, { method: 'GET', redirect: 'follow' });
     if (res.ok) {
       const json = await res.json();
@@ -248,6 +355,10 @@ export async function fetchDataFromAppsScript(url: string): Promise<{
           sheetTitle: json.data.spreadsheetTitle,
           sheetId: json.data.spreadsheetId,
           sheetUrl: json.data.spreadsheetUrl,
+          totalInspectionRows: json.data.totalInspectionRows,
+          serverFiltered: !!json.data.serverFiltered,
+          appliedStartDate: json.data.appliedStartDate || resolvedRange.startDate,
+          appliedEndDate: json.data.appliedEndDate || resolvedRange.endDate,
         };
       }
     }
@@ -256,7 +367,12 @@ export async function fetchDataFromAppsScript(url: string): Promise<{
   }
 
   try {
-    const json = await callAppsScriptApi(cleanUrl, { action: 'getAllData' });
+    const json = await callAppsScriptApi(cleanUrl, {
+      action: 'getAllData',
+      ...(options?.days !== undefined ? { days: options.days } : {}),
+      ...(resolvedRange.startDate ? { startDate: resolvedRange.startDate } : {}),
+      ...(resolvedRange.endDate ? { endDate: resolvedRange.endDate } : {}),
+    });
     if (json && json.success && json.data) {
       return {
         success: true,
@@ -268,11 +384,92 @@ export async function fetchDataFromAppsScript(url: string): Promise<{
         sheetTitle: json.data.spreadsheetTitle,
         sheetId: json.data.spreadsheetId,
         sheetUrl: json.data.spreadsheetUrl,
+        totalInspectionRows: json.data.totalInspectionRows,
+        serverFiltered: !!json.data.serverFiltered,
+        appliedStartDate: json.data.appliedStartDate || resolvedRange.startDate,
+        appliedEndDate: json.data.appliedEndDate || resolvedRange.endDate,
       };
     }
     return { success: false, message: json?.message || 'ไม่สามารถดึงข้อมูลจาก Google Sheets ได้' };
   } catch (err: any) {
     return { success: false, message: err?.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลจาก Google Sheets' };
+  }
+}
+
+/**
+ * Fetch only inspection records for a specific date range from Google Apps Script
+ */
+export async function fetchInspectionsRangeFromAppsScript(
+  url: string,
+  options?: FetchDateRangeOptions
+): Promise<{
+  success: boolean;
+  inspections?: InspectionRecord[];
+  totalInspectionRows?: number;
+  serverFiltered?: boolean;
+  appliedStartDate?: string;
+  appliedEndDate?: string;
+  message?: string;
+}> {
+  const cleanUrl = url.trim();
+  if (!cleanUrl) {
+    return { success: false, message: 'ไม่มี URL ของ Google Apps Script' };
+  }
+
+  const resolvedRange =
+    options?.startDate || options?.endDate
+      ? { startDate: options.startDate, endDate: options.endDate }
+      : options?.days
+      ? computeDateRangeFromDays(options.days)
+      : {};
+
+  const queryParams = new URLSearchParams();
+  queryParams.set('action', 'getInspections');
+  if (options?.days !== undefined) queryParams.set('days', String(options.days));
+  if (resolvedRange.startDate) queryParams.set('startDate', resolvedRange.startDate);
+  if (resolvedRange.endDate) queryParams.set('endDate', resolvedRange.endDate);
+
+  try {
+    const separator = cleanUrl.includes('?') ? '&' : '?';
+    const getUrl = `${cleanUrl}${separator}${queryParams.toString()}`;
+    const res = await fetch(getUrl, { method: 'GET', redirect: 'follow' });
+    if (res.ok) {
+      const json = await res.json();
+      if (json && json.success && Array.isArray(json.inspections)) {
+        return {
+          success: true,
+          inspections: json.inspections,
+          totalInspectionRows: json.totalInspectionRows,
+          serverFiltered: !!json.serverFiltered,
+          appliedStartDate: json.appliedStartDate || resolvedRange.startDate,
+          appliedEndDate: json.appliedEndDate || resolvedRange.endDate,
+        };
+      }
+    }
+  } catch {
+    // try POST
+  }
+
+  try {
+    const json = await callAppsScriptApi(cleanUrl, {
+      action: 'getInspections',
+      ...(options?.days !== undefined ? { days: options.days } : {}),
+      ...(resolvedRange.startDate ? { startDate: resolvedRange.startDate } : {}),
+      ...(resolvedRange.endDate ? { endDate: resolvedRange.endDate } : {}),
+    });
+    if (json && json.success && Array.isArray(json.inspections)) {
+      return {
+        success: true,
+        inspections: json.inspections,
+        totalInspectionRows: json.totalInspectionRows,
+        serverFiltered: !!json.serverFiltered,
+        appliedStartDate: json.appliedStartDate || resolvedRange.startDate,
+        appliedEndDate: json.appliedEndDate || resolvedRange.endDate,
+      };
+    }
+    return { success: false, message: json?.message || 'ไม่สามารถดึงประวัติการตรวจจาก Google Sheets ได้' };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'เกิดข้อผิดพลาดในการดึงประวัติการตรวจจาก Google Sheets' };
   }
 }
 

@@ -171,7 +171,15 @@ export const saveInspections = (records: InspectionRecord[]): void => {
   try {
     localStorage.setItem(INSPECTIONS_KEY, JSON.stringify(records));
   } catch (e) {
-    console.error('Error saving inspections to storage:', e);
+    console.warn('Error saving full inspections to localStorage (possibly quota exceeded), caching latest 500 records:', e);
+    try {
+      const sorted = [...records].sort(
+        (a, b) => new Date(b.inspectionDate).getTime() - new Date(a.inspectionDate).getTime()
+      );
+      localStorage.setItem(INSPECTIONS_KEY, JSON.stringify(sorted.slice(0, 500)));
+    } catch (innerErr) {
+      console.error('Failed to save trimmed inspections to storage:', innerErr);
+    }
   }
 };
 
