@@ -26,7 +26,7 @@ import {
   QrCode
 } from 'lucide-react';
 import { Vehicle, InspectionRecord } from '../types/vehicle';
-import { SpreadsheetInfo } from '../services/googleSheets';
+import { SpreadsheetInfo, formatLocalYMD, extractInspectionYMD } from '../services/googleSheets';
 import { VEHICLE_CATEGORY_META } from './VehicleManager';
 
 interface DashboardProps {
@@ -117,10 +117,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Inspections today (using local date string YYYY-MM-DD)
   const todayDateObj = new Date();
-  const todayStr = todayDateObj.toISOString().split('T')[0];
+  const todayStr = formatLocalYMD(todayDateObj);
   
   // Set of vehicle IDs inspected today
-  const inspectedTodayRecords = displayedInspections.filter((i) => i.inspectionDate.startsWith(todayStr));
+  const inspectedTodayRecords = displayedInspections.filter(
+    (i) => extractInspectionYMD(i.inspectionDate) === todayStr
+  );
   const inspectedVehicleIdsToday = new Set(inspectedTodayRecords.map((i) => i.vehicleId));
 
   // Vehicles that have NOT been inspected today (excluding those in maintenance)

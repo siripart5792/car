@@ -5,7 +5,7 @@ const SPREADSHEET_INFO_STORAGE_KEY = 'vehicle_inspection_spreadsheet_info_v3';
 const WEBHOOK_URL_STORAGE_KEY = 'vehicle_inspection_webhook_url';
 const FETCH_DAYS_STORAGE_KEY = 'vehicle_inspection_fetch_days_v1';
 
-export type InspectionFetchDays = 7 | 30 | 90 | 180 | 365 | 'all';
+export type InspectionFetchDays = 1 | 7 | 30 | 90 | 180 | 365 | 'all';
 
 export interface FetchDateRangeOptions {
   days?: InspectionFetchDays;

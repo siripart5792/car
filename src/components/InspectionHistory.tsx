@@ -1388,7 +1388,7 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
                     </select>
                   ) : (
                     <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg font-bold">
-                      {loadedDays === 'all' ? 'ทั้งหมด' : `${loadedDays} วันล่าสุด`}
+                      {loadedDays === 'all' ? 'ทั้งหมด' : loadedDays === 1 ? 'เฉพาะวันนี้' : `${loadedDays} วันล่าสุด`}
                     </span>
                   )}
                   <span className="text-[11px] text-slate-500">
@@ -1420,8 +1420,8 @@ export const InspectionHistory: React.FC<InspectionHistoryProps> = ({
                     <span>
                       ขณะนี้โหลดข้อมูลมาแสดงเฉพาะ{' '}
                       <strong>
-                        {loadedDays} วันล่าสุด
-                        {loadedStart ? ` (ตั้งแต่ ${new Date(loadedStart + 'T00:00:00').toLocaleDateString('th-TH')})` : ''}
+                        {loadedDays === 1 ? 'เฉพาะวันนี้' : `${loadedDays} วันล่าสุด`}
+                        {loadedStart && loadedDays !== 1 ? ` (ตั้งแต่ ${new Date(loadedStart + 'T00:00:00').toLocaleDateString('th-TH')})` : ''}
                       </strong>{' '}
                       เพื่อความรวดเร็ว ช่วงวันที่ที่คุณเลือกอาจมีข้อมูลเก่ากว่าใน Google Sheets
                     </span>

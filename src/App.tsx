@@ -139,7 +139,7 @@ export default function App() {
     totalInSheet?: number;
     serverFiltered?: boolean;
   }>(() => {
-    const initialDays: InspectionFetchDays = !isAdmin ? 7 : getSavedFetchDays();
+    const initialDays: InspectionFetchDays = !isAdmin ? 1 : getSavedFetchDays();
     const range = computeDateRangeFromDays(initialDays);
     return {
       days: initialDays,
@@ -183,7 +183,7 @@ export default function App() {
       return;
     }
 
-    // For general users on Dashboard or Inspection Form, limit Google Sheets pull to the latest 7 days for fast loading
+    // For general users on Dashboard or Inspection Form, limit Google Sheets pull to today only (1 day) for fastest loading
     const isGeneralQuickPage =
       !isAdminRef.current &&
       (activeTabRef.current === 'dashboard' || activeTabRef.current === 'inspect');
@@ -192,14 +192,19 @@ export default function App() {
       overrideDays !== undefined
         ? overrideDays
         : isGeneralQuickPage
-        ? 7
+        ? 1
         : fetchDaysRef.current;
     const range = computeDateRangeFromDays(activeDays);
 
     setIsFetchingFromSheets(true);
     try {
       if (!silent) {
-        const rangeText = activeDays === 'all' ? 'ทั้งหมด' : `${activeDays} วันล่าสุด`;
+        const rangeText =
+          activeDays === 'all'
+            ? 'ทั้งหมด'
+            : activeDays === 1
+            ? 'เฉพาะวันนี้'
+            : `${activeDays} วันล่าสุด`;
         showToast(`กำลังดึงข้อมูลจาก Google Sheets (${rangeText})...`, 'info');
       }
       const res = await fetchDataFromAppsScript(webhookUrl, {
@@ -241,7 +246,12 @@ export default function App() {
           setInspections(finalInspections);
           saveInspections(finalInspections);
           countInspections = finalInspections.length;
-          const rangeTag = activeDays === 'all' ? 'ทั้งหมด' : `${activeDays} วันล่าสุด`;
+          const rangeTag =
+            activeDays === 'all'
+              ? 'ทั้งหมด'
+              : activeDays === 1
+              ? 'เฉพาะวันนี้'
+              : `${activeDays} วันล่าสุด`;
           updatedParts.push(`ประวัติ ${countInspections} รายการ (${rangeTag})`);
         }
 
@@ -420,7 +430,7 @@ export default function App() {
     };
   }, [handlePullFromSheets]);
 
-  // 1.0.1 When switching to History/Admin or logging in as Admin, ensure configured fetchDays range is loaded if currently limited to 7 days
+  // 1.0.1 When switching to History/Vehicles/Admin or logging in as Admin, ensure configured fetchDays range is loaded if currently limited to 1 day (today only)
   useEffect(() => {
     const needsConfiguredRange =
       isAdmin || (activeTab !== 'dashboard' && activeTab !== 'inspect');
