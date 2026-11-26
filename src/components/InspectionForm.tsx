@@ -62,7 +62,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
   const selectedVehicle = vehicles.find((v) => v.id === selectedVehicleId);
   const activeCategory: VehicleCategory = selectedVehicle?.category || 'general';
 
-  const [odometer, setOdometer] = useState<number>(selectedVehicle?.lastOdometer || 0);
+  const [odometer, setOdometer] = useState<string>('');
   const [inspectorName, setInspectorName] = useState<string>('');
   const [inspectorPhone, setInspectorPhone] = useState<string>('');
   const [workDescription, setWorkDescription] = useState<string>('');
@@ -111,12 +111,10 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
   const [formError, setFormError] = useState('');
   const [showOdoConfirm, setShowOdoConfirm] = useState(false);
 
-  // Sync odometer when vehicle changes
+  // Reset odometer input to blank when selected vehicle changes
   useEffect(() => {
-    if (selectedVehicle) {
-      setOdometer(selectedVehicle.lastOdometer || 0);
-    }
-  }, [selectedVehicleId, selectedVehicle]);
+    setOdometer('');
+  }, [selectedVehicleId]);
 
   // If preselectedVehicleId changes externally
   useEffect(() => {
@@ -188,6 +186,11 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
       const itemsToSave = isNotInUseToday ? [] : items;
       const finalStatus: OverallStatus = isNotInUseToday ? 'not_used' : overallStatus;
 
+      const numericOdometer =
+        odometer.trim() !== '' && !isNaN(Number(odometer))
+          ? Number(odometer)
+          : (selectedVehicle.lastOdometer || 0);
+
       await onSaveInspection({
         vehicleId: selectedVehicle.id,
         vehicleLicensePlate: selectedVehicle.licensePlate,
@@ -198,7 +201,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
         model: selectedVehicle.model,
         department: selectedVehicle.department,
         inspectionDate: new Date().toISOString(),
-        odometer: Number(odometer) || (selectedVehicle.lastOdometer || 0),
+        odometer: numericOdometer,
         inspectorName: inspectorName.trim(),
         inspectorPhone: inspectorPhone.trim(),
         workDescription: isNotInUseToday
@@ -228,12 +231,18 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
       setFormError('กรุณาเลือกยานพาหนะ');
       return;
     }
+    const trimmedOdometer = odometer.trim();
+    const numericOdometer = Number(trimmedOdometer);
+    if (trimmedOdometer === '' || isNaN(numericOdometer) || numericOdometer < 0) {
+      setFormError('กรุณาระบุเลขไมล์ปัจจุบัน');
+      return;
+    }
     if (!inspectorName.trim()) {
       setFormError(isNotInUseToday ? 'กรุณาระบุชื่อผู้รายงาน / พนักงานขับรถ' : 'กรุณาระบุชื่อผู้ตรวจสอบ / พนักงานขับรถ');
       return;
     }
 
-    if (!isNotInUseToday && odometer < selectedVehicle.lastOdometer) {
+    if (!isNotInUseToday && numericOdometer < selectedVehicle.lastOdometer) {
       setShowOdoConfirm(true);
       return;
     }
@@ -245,6 +254,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
   const handleResetForNew = () => {
     setSubmittedRecordId(null);
     setIsNotInUseToday(false);
+    setOdometer('');
     handleMarkAllPass();
     setSummaryRemarks('');
     setWorkDescription('');
@@ -407,9 +417,6 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
             onClick={() => {
               setIsNotInUseToday(true);
               setOverallStatus('not_used');
-              if (selectedVehicle) {
-                setOdometer(selectedVehicle.lastOdometer);
-              }
             }}
             className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all ${
               isNotInUseToday
@@ -495,8 +502,9 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
               type="number"
               min="0"
               required
+              placeholder="กรอกเลขไมล์ปัจจุบัน"
               value={odometer}
-              onChange={(e) => setOdometer(Number(e.target.value))}
+              onChange={(e) => setOdometer(e.target.value)}
               className="w-full px-3 py-2 font-mono font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
             />
             {selectedVehicle && (
@@ -990,7 +998,7 @@ export const InspectionForm: React.FC<InspectionFormProps> = ({
         <ConfirmModal
           isOpen={showOdoConfirm}
           title="ยืนยันเลขไมล์ที่ระบุ"
-          message={`เลขไมล์ที่ระบุ (${odometer.toLocaleString()} กม.) มีค่าน้อยกว่าเลขไมล์ล่าสุด (${selectedVehicle.lastOdometer.toLocaleString()} กม.)\n\nคุณต้องการบันทึกผลการตรวจสอบด้วยเลขไมล์นี้ต่อหรือไม่?`}
+          message={`เลขไมล์ที่ระบุ (${Number(odometer || 0).toLocaleString()} กม.) มีค่าน้อยกว่าเลขไมล์ล่าสุด (${selectedVehicle.lastOdometer.toLocaleString()} กม.)\n\nคุณต้องการบันทึกผลการตรวจสอบด้วยเลขไมล์นี้ต่อหรือไม่?`}
           confirmLabel="บันทึกต่อ"
           cancelLabel="กลับไปแก้ไขเลขไมล์"
           isDestructive={false}
